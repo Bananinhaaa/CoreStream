@@ -25,7 +25,6 @@ interface AccountData {
 const MASTER_ADMIN_EMAIL = 'davielucas914@gmail.com';
 const SESSION_KEY = 'CORE_SESSION_ACTIVE';
 const ACTIVE_USER_KEY = 'CORE_ACTIVE_USERNAME';
-const AUTO_CONNECT_KEY = 'CORE_AUTO_CONNECT';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('home');
@@ -37,12 +36,10 @@ const App: React.FC = () => {
   const [accounts, setAccounts] = useState<AccountData[]>([]);
   const [currentUsername, setCurrentUsername] = useState<string | null>(localStorage.getItem(ACTIVE_USER_KEY));
 
-  // CARREGAMENTO E CONEXÃO AUTOMÁTICA
   useEffect(() => {
     const initializeApp = async () => {
       setIsLoading(true);
       try {
-        // Busca dados globais (Sincronização com Supabase se as chaves existirem)
         const [globalVideos, globalProfiles] = await Promise.all([
           databaseService.getVideos(),
           databaseService.getProfiles()
@@ -59,28 +56,43 @@ const App: React.FC = () => {
           if (userExists) {
             setCurrentUsername(savedUsername);
             setIsLoggedIn(true);
-          } else {
-            // Se o usuário não existe mais no banco (foi deletado), limpa sessão
-            handleLogout();
           }
         }
       } catch (error) {
-        console.error("Erro na inicialização:", error);
       } finally {
         setIsLoading(false);
       }
     };
     initializeApp();
+
+    // Sincronização periódica de dados (Polloing leve para status online)
+    const interval = setInterval(async () => {
+      const profiles = await databaseService.getProfiles();
+      if (profiles.length > 0) setAccounts(profiles);
+    }, 60000); // 1 minuto
+
+    return () => clearInterval(interval);
   }, []);
+
+  // HEARTBEAT: Avisa que o usuário está online
+  useEffect(() => {
+    if (isLoggedIn && currentUsername) {
+      databaseService.updatePresence(currentUsername);
+      const heartbeat = setInterval(() => {
+        databaseService.updatePresence(currentUsername);
+      }, 30000); // 30 segundos
+      return () => clearInterval(heartbeat);
+    }
+  }, [isLoggedIn, currentUsername]);
 
   const activeAccount = useMemo(() => {
     if (!currentUsername || accounts.length === 0) return null;
     return accounts.find(a => a.profile.username === currentUsername) || null;
   }, [accounts, currentUsername]);
 
-  const handleUpdateAccountStats = useCallback((username: string, stats: Partial<UserProfile> & { password?: string, email?: string }) => {
+  const handleUpdateAccountStats = useCallback((username: string, stats: any) => {
     setAccounts(prev => {
-      const newAccounts = prev.map(a => {
+      return prev.map(a => {
         if (a.profile.username === username) {
           const updated = { 
             ...a, 
@@ -93,7 +105,6 @@ const App: React.FC = () => {
         }
         return a;
       });
-      return newAccounts;
     });
   }, []);
 
@@ -102,7 +113,6 @@ const App: React.FC = () => {
     setCurrentUsername(null);
     localStorage.setItem(SESSION_KEY, 'false');
     localStorage.removeItem(ACTIVE_USER_KEY);
-    localStorage.setItem(AUTO_CONNECT_KEY, 'false');
     setActiveTab('home');
   };
 
@@ -111,14 +121,13 @@ const App: React.FC = () => {
     setIsLoggedIn(true);
     localStorage.setItem(SESSION_KEY, 'true');
     localStorage.setItem(ACTIVE_USER_KEY, username);
-    localStorage.setItem(AUTO_CONNECT_KEY, 'true');
   };
 
   if (isLoading) {
     return (
       <div className="h-screen bg-black flex flex-col items-center justify-center">
         <div className="w-12 h-12 border-4 border-white/10 border-t-white rounded-full animate-spin mb-6"></div>
-        <p className="text-[10px] font-black uppercase tracking-[0.5em] animate-pulse text-white/40">Sincronizando Core...</p>
+        <p className="text-[10px] font-black uppercase tracking-[0.5em] animate-pulse text-white/40">Conectando ao Core...</p>
       </div>
     );
   }
@@ -139,7 +148,7 @@ const App: React.FC = () => {
                 ...rand, email: id, bio: 'Novo explorador no CoreStream', avatar: '', 
                 followers: 0, following: 0, likes: 0, repostedVideoIds: [], 
                 notifications: [], isVerified: isMaster, isAdmin: isMaster, isBanned: false,
-                profileColor: '#000000'
+                profileColor: '#000000', lastSeen: Date.now()
               } 
             };
             await databaseService.saveProfile(newAcc);
@@ -195,7 +204,6 @@ const App: React.FC = () => {
             onAddAccount={() => { 
               setIsLoggedIn(false); 
               localStorage.setItem(SESSION_KEY, 'false');
-              localStorage.setItem(AUTO_CONNECT_KEY, 'false');
               setActiveTab('home'); 
             }} 
             onDeleteAccount={() => {}} 

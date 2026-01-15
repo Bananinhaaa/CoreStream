@@ -6,32 +6,44 @@ import { INITIAL_VIDEOS } from '../constants';
 const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
 
-const supabase = (supabaseUrl && supabaseAnonKey && supabaseUrl !== 'undefined') 
+export const supabase = (supabaseUrl && supabaseAnonKey && supabaseUrl !== 'undefined') 
   ? createClient(supabaseUrl, supabaseAnonKey) 
   : null;
 
 const LOCAL_VIDEOS_KEY = 'CORE_STORAGE_VIDEOS_V3';
 const LOCAL_PROFILES_KEY = 'CORE_STORAGE_PROFILES_V3';
 
+export const BUCKETS = {
+  VIDEOS: 'videos',
+  AVATARS: 'avatars'
+};
+
 export const databaseService = {
-  // --- STORAGE (UPLOAD DE ARQUIVOS) ---
   async uploadFile(bucket: 'videos' | 'avatars', file: File | Blob, path: string): Promise<string | null> {
     if (!supabase) return null;
     try {
       const { data, error } = await supabase.storage.from(bucket).upload(path, file, {
         upsert: true,
-        contentType: file.type
+        contentType: file.type || (bucket === 'videos' ? 'video/mp4' : 'image/jpeg')
       });
       if (error) throw error;
       const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(data.path);
       return publicUrl;
     } catch (error) {
-      console.error(`Erro no upload para ${bucket}:`, error);
       return null;
     }
   },
 
-  // --- VÍDEOS ---
+  async updatePresence(username: string): Promise<void> {
+    if (!supabase) return;
+    try {
+      await supabase
+        .from('profiles')
+        .update({ last_seen: Date.now() })
+        .eq('username', username);
+    } catch (e) {}
+  },
+
   async getVideos(): Promise<Video[]> {
     let localVideos: Video[] = [];
     try {
@@ -76,13 +88,6 @@ export const databaseService = {
   },
 
   async saveVideo(video: Video): Promise<void> {
-    try {
-      const saved = localStorage.getItem(LOCAL_VIDEOS_KEY);
-      const videos = saved ? JSON.parse(saved) : [];
-      const updatedVideos = [video, ...videos.filter((v: Video) => v.id !== video.id)];
-      localStorage.setItem(LOCAL_VIDEOS_KEY, JSON.stringify(updatedVideos));
-    } catch (e) {}
-
     if (!supabase) return;
     try {
       await supabase.from('videos').upsert([{
@@ -99,26 +104,16 @@ export const databaseService = {
         owner_is_verified: video.isVerified,
         comments_json: video.comments
       }], { onConflict: 'id' });
-    } catch (error) {
-      console.error("Erro ao salvar vídeo:", error);
-    }
+    } catch (error) {}
   },
 
-  // --- PERFIS ---
   async getProfiles(): Promise<any[]> {
-    let profilesLocal: any[] = [];
-    try {
-      const localData = localStorage.getItem(LOCAL_PROFILES_KEY);
-      profilesLocal = localData ? JSON.parse(localData) : [];
-    } catch (e) {}
-
-    if (!supabase) return profilesLocal;
-
+    if (!supabase) return [];
     try {
       const { data, error } = await supabase.from('profiles').select('*');
       if (error) throw error;
       
-      const profilesApi = data.map((p: any) => ({
+      return data.map((p: any) => ({
         email: p.email,
         password: p.password,
         followingMap: p.following_map || {},
@@ -136,25 +131,16 @@ export const databaseService = {
           isBanned: p.is_banned,
           profileColor: p.profile_color,
           repostedVideoIds: p.reposted_ids || [],
-          notifications: p.notifications_json || []
+          notifications: p.notifications_json || [],
+          lastSeen: p.last_seen
         }
       }));
-
-      localStorage.setItem(LOCAL_PROFILES_KEY, JSON.stringify(profilesApi));
-      return profilesApi;
     } catch (error) {
-      return profilesLocal;
+      return [];
     }
   },
 
   async saveProfile(account: any): Promise<void> {
-    try {
-      const saved = localStorage.getItem(LOCAL_PROFILES_KEY);
-      const profiles = saved ? JSON.parse(saved) : [];
-      const updatedProfiles = [...profiles.filter((p: any) => p.profile.username !== account.profile.username), account];
-      localStorage.setItem(LOCAL_PROFILES_KEY, JSON.stringify(updatedProfiles));
-    } catch (e) {}
-
     if (!supabase) return;
     try {
       const p = account.profile;
@@ -174,10 +160,9 @@ export const databaseService = {
         profile_color: p.profileColor,
         following_map: account.followingMap,
         reposted_ids: p.repostedVideoIds,
-        notifications_json: p.notifications
+        notifications_json: p.notifications,
+        last_seen: Date.now()
       }, { onConflict: 'username' });
-    } catch (error) {
-      console.error("Erro ao salvar perfil:", error);
-    }
+    } catch (error) {}
   }
 };

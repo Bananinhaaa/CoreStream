@@ -19,6 +19,15 @@ const Discover: React.FC<DiscoverProps> = ({ videos, onNavigateToProfile, curren
     getTrendingNews().then(setTrends);
   }, []);
 
+  const onlineUsers = useMemo(() => {
+    const FIVE_MINUTES = 5 * 60 * 1000;
+    const now = Date.now();
+    return allAccounts
+      .filter(acc => acc.profile.username !== currentUser.username) // Não mostrar a si mesmo
+      .filter(acc => acc.profile.lastSeen && (now - acc.profile.lastSeen) < FIVE_MINUTES)
+      .map(acc => acc.profile);
+  }, [allAccounts, currentUser.username]);
+
   const filteredVideos = useMemo(() => {
     if (!searchTerm.trim()) return videos;
     const term = searchTerm.toLowerCase();
@@ -29,7 +38,6 @@ const Discover: React.FC<DiscoverProps> = ({ videos, onNavigateToProfile, curren
   }, [searchTerm, videos]);
 
   const filteredUsers = useMemo(() => {
-    // Retorna todos se não houver busca
     if (!searchTerm.trim()) return allAccounts;
     const term = searchTerm.toLowerCase();
     return allAccounts.filter(acc => 
@@ -55,6 +63,40 @@ const Discover: React.FC<DiscoverProps> = ({ videos, onNavigateToProfile, curren
       </header>
 
       <div className="px-6 space-y-12 mt-8">
+        {/* ONLINE USERS SECTION */}
+        {onlineUsers.length > 0 && (
+          <section className="animate-view">
+             <div className="flex items-center justify-between mb-6 px-1">
+               <h3 className="text-[10px] font-black uppercase text-green-400 tracking-[0.4em] flex items-center gap-2">
+                 Online Agora 
+                 <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.8)]"></span>
+               </h3>
+               <span className="text-[9px] font-black text-gray-600 uppercase tracking-widest">{onlineUsers.length}</span>
+             </div>
+             <div className="flex gap-5 overflow-x-auto no-scrollbar pb-2">
+                {onlineUsers.map((user) => (
+                  <div 
+                    key={user.username}
+                    onClick={() => onNavigateToProfile(user.username)}
+                    className="flex flex-col items-center gap-2 shrink-0 cursor-pointer group"
+                  >
+                    <div className="relative">
+                      <div className="w-14 h-14 rounded-2xl bg-zinc-900 border border-white/10 p-0.5 group-active:scale-90 transition-transform">
+                        {user.avatar ? (
+                          <img src={user.avatar} className="w-full h-full object-cover rounded-[0.8rem]" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center font-black text-lg bg-zinc-800 rounded-[0.8rem]">{user.username.charAt(0).toUpperCase()}</div>
+                        )}
+                      </div>
+                      <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 border-[3px] border-black rounded-full shadow-lg"></div>
+                    </div>
+                    <p className="text-[8px] font-black text-white uppercase truncate w-14 text-center">{user.displayName.split(' ')[0]}</p>
+                  </div>
+                ))}
+             </div>
+          </section>
+        )}
+
         {trends.length > 0 && (
           <section className="animate-view">
              <div className="flex items-center justify-between mb-6 px-1">
@@ -71,9 +113,6 @@ const Discover: React.FC<DiscoverProps> = ({ videos, onNavigateToProfile, curren
                   >
                     <p className="text-[9px] font-black text-gray-500 uppercase mb-2 group-hover:text-indigo-400 transition-colors">{chunk.web?.title || 'Notícia Tech'}</p>
                     <p className="text-xs font-medium text-white line-clamp-2 italic">Acompanhe as últimas novidades no CoreStream</p>
-                    <div className="mt-4 flex justify-end">
-                       <svg className="w-4 h-4 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M14 5l7 7-7 7" strokeWidth="2.5"/></svg>
-                    </div>
                   </a>
                 ))}
              </div>
@@ -82,7 +121,7 @@ const Discover: React.FC<DiscoverProps> = ({ videos, onNavigateToProfile, curren
 
         <section>
           <div className="flex items-center justify-between mb-6 px-1">
-            <h3 className="text-[10px] font-black uppercase text-white tracking-[0.4em]">Scripters Populares</h3>
+            <h3 className="text-[10px] font-black uppercase text-white tracking-[0.4em]">Todos os Scripters</h3>
             <span className="text-[9px] font-black text-gray-600 uppercase tracking-widest">{filteredUsers.length}</span>
           </div>
           <div className="grid grid-cols-4 gap-x-4 gap-y-8">
@@ -98,9 +137,6 @@ const Discover: React.FC<DiscoverProps> = ({ videos, onNavigateToProfile, curren
                   ) : (
                     <span className="font-black text-xl text-white/20">{acc.profile.username.charAt(0).toUpperCase()}</span>
                   )}
-                  {acc.profile.isAdmin && (
-                    <div className="absolute top-1 right-1 w-2 h-2 bg-indigo-500 rounded-full shadow-[0_0_8px_rgba(99,102,241,0.8)]"></div>
-                  )}
                 </div>
                 <div className="flex flex-col items-center w-full px-1 overflow-hidden text-center">
                   <span className="text-[8px] font-black text-white uppercase truncate w-full flex items-center justify-center gap-0.5">
@@ -110,38 +146,7 @@ const Discover: React.FC<DiscoverProps> = ({ videos, onNavigateToProfile, curren
                 </div>
               </div>
             ))}
-            {filteredUsers.length === 0 && (
-              <div className="col-span-full py-10 text-center opacity-30 italic text-[10px] uppercase tracking-widest">
-                Nenhum scripter encontrado.
-              </div>
-            )}
           </div>
-        </section>
-
-        <section>
-          <div className="flex items-center justify-between mb-6 px-1">
-            <h3 className="text-[10px] font-black uppercase text-white tracking-[0.4em]">Explorar Posts</h3>
-            <span className="text-[9px] font-black text-gray-600 uppercase tracking-widest">{filteredVideos.length}</span>
-          </div>
-          
-          {filteredVideos.length > 0 ? (
-            <div className="grid grid-cols-2 gap-4">
-              {filteredVideos.map(video => (
-                <div key={video.id} onClick={() => onNavigateToProfile(video.username)} className="aspect-[3/4] bg-white/5 rounded-3xl overflow-hidden relative group border border-white/5 cursor-pointer active:scale-95 transition-all shadow-xl">
-                  <video src={video.url} className="w-full h-full object-cover opacity-80" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent" />
-                  <div className="absolute bottom-4 left-4 right-4">
-                    <p className="text-[10px] font-black text-white truncate mb-1">@{video.username} {video.isVerified && <VerifiedBadge size="10" />}</p>
-                    <p className="text-[8px] text-white/40 line-clamp-1 italic">{video.description}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="py-24 text-center bg-white/5 rounded-[2.5rem] border border-white/10 flex flex-col items-center">
-               <p className="text-[10px] font-black text-gray-700 uppercase tracking-[0.3em]">Nada postado ainda</p>
-            </div>
-          )}
         </section>
       </div>
     </div>

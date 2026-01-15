@@ -59,6 +59,7 @@ export interface UserProfile {
   twoFactorEnabled?: boolean;
   repostedVideoIds: string[];
   notifications: Notification[];
-  lastUsernameChange?: number; // Timestamp da última troca de username
-  lastDisplayNameChange?: number; // Timestamp da última troca de nome
+  lastUsernameChange?: number;
+  lastDisplayNameChange?: number;
+  lastSeen?: number; // Timestamp da última atividade
 }
