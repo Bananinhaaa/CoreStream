@@ -25,6 +25,7 @@ interface AccountData {
 const MASTER_ADMIN_EMAIL = 'davielucas914@gmail.com';
 const SESSION_KEY = 'CORE_SESSION_ACTIVE';
 const ACTIVE_INDEX_KEY = 'CORE_ACTIVE_ACCOUNT_IDX';
+const AUTO_CONNECT_KEY = 'CORE_AUTO_CONNECT';
 
 const App: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(() => localStorage.getItem(SESSION_KEY) === 'true');
@@ -34,7 +35,6 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [videos, setVideos] = useState<Video[]>([]);
   const [accounts, setAccounts] = useState<AccountData[]>([]);
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
   const [currentAccountIndex, setCurrentAccountIndex] = useState(() => {
     const saved = localStorage.getItem(ACTIVE_INDEX_KEY);
@@ -49,10 +49,28 @@ const App: React.FC = () => {
           databaseService.getVideos(),
           databaseService.getProfiles()
         ]);
+        
         setVideos(globalVideos);
         setAccounts(globalProfiles);
+
+        if (globalProfiles.length > 0) {
+          const hasSession = localStorage.getItem(SESSION_KEY) === 'true';
+          const autoConnect = localStorage.getItem(AUTO_CONNECT_KEY) !== 'false';
+
+          if (hasSession || autoConnect) {
+            const savedIdx = localStorage.getItem(ACTIVE_INDEX_KEY);
+            const idx = savedIdx ? parseInt(savedIdx) : 0;
+            
+            if (idx >= 0 && idx < globalProfiles.length) {
+              setCurrentAccountIndex(idx);
+              setIsLoggedIn(true);
+              localStorage.setItem(SESSION_KEY, 'true');
+              localStorage.setItem(AUTO_CONNECT_KEY, 'true');
+            }
+          }
+        }
       } catch (error) {
-        setVideos([]);
+        console.error("Erro ao carregar dados:", error);
       } finally {
         setIsLoading(false);
       }
@@ -66,54 +84,45 @@ const App: React.FC = () => {
     return accounts[safeIdx];
   }, [accounts, currentAccountIndex]);
 
-  const addNotification = useCallback((targetUsername: string, notification: Omit<Notification, 'id' | 'timestamp'>) => {
-    setAccounts(prev => prev.map(acc => {
-      if (targetUsername === 'all' || acc.profile.username === targetUsername) {
-        const updatedAcc = {
-          ...acc,
-          profile: {
-            ...acc.profile,
-            notifications: [{
-              ...notification,
-              id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-              timestamp: Date.now()
-            }, ...(acc.profile.notifications || [])]
-          }
-        };
-        databaseService.saveProfile(updatedAcc);
-        return updatedAcc;
-      }
-      return acc;
-    }));
-  }, []);
-
   const handleUpdateAccountStats = (username: string, stats: Partial<UserProfile> & { password?: string, email?: string }) => {
-    setAccounts(prev => prev.map(a => {
-      if (a.profile.username === username) {
-        const updated = { 
-          ...a, 
-          profile: { ...a.profile, ...stats },
-          email: stats.email || a.email,
-          password: stats.password || a.password
-        };
-        databaseService.saveProfile(updated);
-        return updated;
-      }
-      return a;
-    }));
+    setAccounts(prev => {
+      const newAccounts = prev.map(a => {
+        if (a.profile.username === username) {
+          const updated = { 
+            ...a, 
+            profile: { ...a.profile, ...stats },
+            email: stats.email || a.email,
+            password: stats.password || a.password
+          };
+          databaseService.saveProfile(updated);
+          return updated;
+        }
+        return a;
+      });
+      return newAccounts;
+    });
   };
 
   const handleLogout = () => {
     setIsLoggedIn(false);
-    localStorage.removeItem(SESSION_KEY);
+    localStorage.setItem(SESSION_KEY, 'false');
+    localStorage.setItem(AUTO_CONNECT_KEY, 'false');
     setActiveTab('home');
+  };
+
+  const handleLoginSuccess = (idx: number) => {
+    setCurrentAccountIndex(idx);
+    setIsLoggedIn(true);
+    localStorage.setItem(SESSION_KEY, 'true');
+    localStorage.setItem(ACTIVE_INDEX_KEY, idx.toString());
+    localStorage.setItem(AUTO_CONNECT_KEY, 'true');
   };
 
   if (isLoading) {
     return (
       <div className="h-screen bg-black flex flex-col items-center justify-center">
         <div className="w-10 h-10 border-4 border-white/20 border-t-white rounded-full animate-spin mb-4"></div>
-        <p className="text-[10px] font-black uppercase tracking-[0.5em]">Limpando o CORE...</p>
+        <p className="text-[10px] font-black uppercase tracking-[0.5em] animate-pulse">CoreStream: Pulso Ativo...</p>
       </div>
     );
   }
@@ -132,18 +141,18 @@ const App: React.FC = () => {
               profile: { 
                 ...rand, email: id, bio: 'Novo explorador no CoreStream', avatar: '', 
                 followers: 0, following: 0, likes: 0, repostedVideoIds: [], 
-                notifications: [], isVerified: isMaster, isAdmin: isMaster, isBanned: false
+                notifications: [], isVerified: isMaster, isAdmin: isMaster, isBanned: false,
+                profileColor: '#000000'
               } 
             };
             await databaseService.saveProfile(newAcc);
-            setAccounts(prev => [...prev, newAcc]);
-            setCurrentAccountIndex(accounts.length);
-            setIsLoggedIn(true);
-            localStorage.setItem(SESSION_KEY, 'true');
+            setAccounts(prev => {
+              const updated = [...prev, newAcc];
+              handleLoginSuccess(updated.length - 1);
+              return updated;
+            });
           } else if (idx !== -1) {
-            setCurrentAccountIndex(idx);
-            setIsLoggedIn(true);
-            localStorage.setItem(SESSION_KEY, 'true');
+            handleLoginSuccess(idx);
           }
         }} 
         registeredAccounts={accounts.map(a => ({ email: a.email, username: a.profile.username, password: a.password }))} 
@@ -151,7 +160,6 @@ const App: React.FC = () => {
     );
   }
 
-  // TELA DE BANIMENTO PARA O USUÁRIO LOGADO
   if (activeAccount.profile.isBanned) {
     return (
       <div className="h-screen bg-black flex flex-col items-center justify-center p-10 text-center animate-view">
@@ -189,15 +197,24 @@ const App: React.FC = () => {
             onUpdateVideoStats={() => {}} 
             onDeleteAccount={() => {}}
             onDeleteVideo={() => {}}
-            onSendSystemMessage={(t, m) => addNotification(t, { type: 'security', fromUser: 'Sistema', fromAvatar: '', text: m })} 
+            onSendSystemMessage={(t, m) => {}} 
             onClose={() => setActiveTab('profile')} 
           />
         )}
         {activeTab === 'switcher' && (
           <AccountSwitcher 
             accounts={accounts.map(a => a.profile)} 
-            onSelect={u => { const idx = accounts.findIndex(a => a.profile.username === u); setCurrentAccountIndex(idx); setActiveTab('home'); }} 
-            onAddAccount={() => { setIsLoggedIn(false); setActiveTab('home'); }} 
+            onSelect={u => { 
+              const idx = accounts.findIndex(a => a.profile.username === u); 
+              handleLoginSuccess(idx);
+              setActiveTab('home'); 
+            }} 
+            onAddAccount={() => { 
+              setIsLoggedIn(false); 
+              localStorage.setItem(SESSION_KEY, 'false');
+              localStorage.setItem(AUTO_CONNECT_KEY, 'false');
+              setActiveTab('home'); 
+            }} 
             onDeleteAccount={() => {}} 
             onBack={() => setActiveTab('profile')} 
           />
