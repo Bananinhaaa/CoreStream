@@ -1,7 +1,7 @@
 {
-  "id": "vibestream-app",
-  "short_name": "VibeStream",
-  "name": "VibeStream Social",
+  "id": "corestream-app",
+  "short_name": "CoreStream",
+  "name": "CoreStream Social",
   "description": "Rede social de vídeos curtos.",
   "start_url": ".",
   "display": "standalone",
@@ -10,15 +10,15 @@
   "orientation": "portrait",
   "icons": [
     {
-      "src": "https://cdn-icons-png.flaticon.com/512/733/733579.png",
-      "sizes": "192x192",
-      "type": "image/png",
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
       "purpose": "any"
     },
     {
-      "src": "https://cdn-icons-png.flaticon.com/512/733/733579.png",
+      "src": "/favicon.svg",
       "sizes": "512x512",
-      "type": "image/png",
+      "type": "image/svg+xml",
       "purpose": "maskable"
     }
   ]
