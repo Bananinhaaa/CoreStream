@@ -1,15 +1,4 @@
 
-/**
- * SHIM DE EMERGÊNCIA: Deve ser a primeira coisa no arquivo.
- * Garante que o SDK do Gemini tenha acesso ao objeto process.env 
- * antes de qualquer componente ou serviço ser importado.
- */
-(window as any).process = {
-  env: {
-    API_KEY: (window as any).process?.env?.API_KEY || ''
-  }
-};
-
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
