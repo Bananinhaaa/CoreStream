@@ -14,7 +14,7 @@
     <meta name="apple-mobile-web-app-title" content="CoreStream" />
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/733/733579.png" />
     
-    <link rel="manifest" href="./manifest.json" />
+    <link rel="manifest" href="/manifest.json" />
     
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap" rel="stylesheet">
@@ -47,23 +47,24 @@
       .video-snap-item { scroll-snap-align: start; scroll-snap-stop: always; height: 100%; }
       @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
       .animate-view { animation: fadeIn 0.4s ease-out forwards; }
+      @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+      .animate-slide-up { animation: slideUp 0.3s ease-out forwards; }
     </style>
-
-    <script type="importmap">
+  <script type="importmap">
 {
   "imports": {
-    "react": "https://esm.sh/react@19.0.0",
-    "react-dom": "https://esm.sh/react-dom@19.0.0?deps=react@19.0.0",
-    "react-dom/client": "https://esm.sh/react-dom@19.0.0/client?deps=react@19.0.0",
-    "@google/genai": "https://esm.sh/@google/genai@1.0.0",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
+    "vite": "https://esm.sh/vite@^7.3.1",
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "react/": "https://esm.sh/react@^19.2.3/"
+    "@google/genai": "https://esm.sh/@google/genai@^1.36.0"
   }
 }
 </script>
-  </head>
+</head>
   <body>
     <div id="root"></div>
-    <script type="module" src="./index.tsx"></script>
+    <script type="module" src="/index.tsx"></script>
   </body>
 </html>
