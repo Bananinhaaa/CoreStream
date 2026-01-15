@@ -5,6 +5,7 @@ import { VerifiedBadge, TrashIcon } from '../components/Icons';
 import VideoPlayer from '../components/VideoPlayer';
 import UserListDrawer from '../components/UserListDrawer';
 import { formatNumber } from '../utils/formatters';
+import { databaseService } from '../services/databaseService';
 
 interface ProfileProps {
   videos: Video[];
@@ -45,16 +46,16 @@ const Profile: React.FC<ProfileProps> = ({
 }) => {
   if (!user) return null;
 
-  // Sistema de alerta de banimento
   useEffect(() => {
     if (user.isBanned && !isOwnProfile) {
-      alert("Esta conta foi banida por violar os termos da comunidade.");
+      alert("Esta conta foi suspensa por violar as diretrizes do Core.");
     }
   }, [user, isOwnProfile]);
 
   const [activeTab, setActiveTab] = useState<'videos' | 'reposts'>('videos');
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [editForm, setEditForm] = useState<UserProfile>(() => ({...user}));
   const [error, setError] = useState('');
   const [listDrawer, setListDrawer] = useState<{ type: 'followers' | 'following' | null; isOpen: boolean }>({ type: null, isOpen: false });
@@ -89,20 +90,24 @@ const Profile: React.FC<ProfileProps> = ({
 
   const validate = (val: string) => /^[a-zA-Z0-9]{3,20}$/.test(val);
 
-  const handleSaveProfile = () => {
+  const handleSaveProfile = async () => {
     setError('');
+    setIsSaving(true);
     
     if (editForm.username !== user.username && !canChangeUsername) {
       setError(`Username bloqueado por mais ${usernameDays} dias.`);
+      setIsSaving(false);
       return;
     }
     if (editForm.displayName !== user.displayName && !canChangeDisplayName) {
       setError(`Nome bloqueado por mais ${displayDays} dias.`);
+      setIsSaving(false);
       return;
     }
 
     if (!validate(editForm.username)) {
       setError('Username: 3-20 letras ou números.');
+      setIsSaving(false);
       return;
     }
 
@@ -112,14 +117,22 @@ const Profile: React.FC<ProfileProps> = ({
 
     onUpdateProfile(user.username, finalUpdates);
     setIsEditing(false);
+    setIsSaving(false);
   };
 
-  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => setEditForm({...editForm, avatar: reader.result as string});
-      reader.readAsDataURL(file);
+      // Feedback visual imediato
+      const tempUrl = URL.createObjectURL(file);
+      setEditForm(prev => ({ ...prev, avatar: tempUrl }));
+
+      // Upload real para o Supabase
+      const fileName = `avatar_${user.username}_${Date.now()}.jpg`;
+      const uploadedUrl = await databaseService.uploadFile('avatars', file, fileName);
+      if (uploadedUrl) {
+        setEditForm(prev => ({ ...prev, avatar: uploadedUrl }));
+      }
     }
   };
 
@@ -128,7 +141,7 @@ const Profile: React.FC<ProfileProps> = ({
 
   const backgroundStyle = {
     background: user.profileColor && user.profileColor !== '#000000' 
-      ? `linear-gradient(to bottom, ${user.profileColor} 0%, #000 600px)` 
+      ? `linear-gradient(to bottom, ${user.profileColor} 0%, #000 500px)` 
       : '#000'
   };
 
@@ -137,8 +150,8 @@ const Profile: React.FC<ProfileProps> = ({
       {user.isBanned && !isOwnProfile && (
          <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-10 text-center">
             <div className="bg-zinc-900 p-8 rounded-[3rem] border border-rose-500/30">
-               <h3 className="text-rose-500 font-black italic uppercase tracking-widest text-xl mb-2">Conta Suspensa</h3>
-               <p className="text-[10px] uppercase font-bold text-gray-500">Este perfil não está mais disponível.</p>
+               <h3 className="text-rose-500 font-black italic uppercase tracking-widest text-xl mb-2">Pulsar Interrompido</h3>
+               <p className="text-[10px] uppercase font-bold text-gray-500">Esta conta foi removida pela moderação.</p>
             </div>
          </div>
       )}
@@ -150,8 +163,8 @@ const Profile: React.FC<ProfileProps> = ({
           {isOwnProfile && <button onClick={onSwitchAccount} className="p-3 bg-white/10 rounded-2xl font-black text-[9px] uppercase tracking-widest border border-white/10">Contas</button>}
         </div>
 
-        <div className="w-28 h-28 rounded-[2rem] bg-black p-1 border border-white/10 mb-6 overflow-hidden">
-           {user.avatar ? <img src={user.avatar} className="w-full h-full object-cover rounded-[1.8rem]" /> : <div className="w-full h-full flex items-center justify-center text-3xl font-black italic">{user.displayName.charAt(0)}</div>}
+        <div className="w-28 h-28 rounded-[2rem] bg-black p-1 border border-white/10 mb-6 overflow-hidden shadow-2xl">
+           {user.avatar ? <img src={user.avatar} className="w-full h-full object-cover rounded-[1.8rem]" /> : <div className="w-full h-full flex items-center justify-center text-3xl font-black italic bg-zinc-900">{user.displayName.charAt(0)}</div>}
         </div>
 
         <div className="text-center mb-6">
@@ -162,11 +175,11 @@ const Profile: React.FC<ProfileProps> = ({
         <div className="flex gap-10 mb-8">
            <div className="text-center cursor-pointer" onClick={() => setListDrawer({ type: 'followers', isOpen: true })}>
              <p className="font-black text-lg italic">{formatNumber(user.followers || 0)}</p>
-             <p className="text-[7px] text-gray-500 uppercase font-black">Followers</p>
+             <p className="text-[7px] text-gray-500 uppercase font-black">Seguidores</p>
            </div>
            <div className="text-center cursor-pointer" onClick={() => setListDrawer({ type: 'following', isOpen: true })}>
              <p className="font-black text-lg italic">{formatNumber(user.following || 0)}</p>
-             <p className="text-[7px] text-gray-500 uppercase font-black">Following</p>
+             <p className="text-[7px] text-gray-500 uppercase font-black">Seguindo</p>
            </div>
            <div className="text-center">
              <p className="font-black text-lg italic">{formatNumber(user.likes || 0)}</p>
@@ -175,7 +188,7 @@ const Profile: React.FC<ProfileProps> = ({
         </div>
 
         <div className="text-xs text-gray-400 text-center mb-8 max-w-xs whitespace-pre-wrap leading-relaxed italic">
-          {user.bio || "Nenhuma bio definida."}
+          {user.bio || "Explorando o CoreStream..."}
         </div>
 
         <div className="w-full max-w-[240px] space-y-3">
@@ -187,13 +200,13 @@ const Profile: React.FC<ProfileProps> = ({
 
           {isOwnProfile && installPrompt && (
             <button onClick={onInstallApp} className="w-full bg-indigo-600 text-white py-4 rounded-2xl text-[9px] font-black uppercase tracking-[0.2em] shadow-xl">
-              Instalar Aplicativo 📱
+              Instalar App 📱
             </button>
           )}
         </div>
 
         <div className="w-full flex border-b border-white/10 mt-10">
-          <button onClick={() => setActiveTab('videos')} className={`flex-1 py-4 text-[9px] font-black uppercase ${activeTab === 'videos' ? 'border-b-2 border-white text-white' : 'text-gray-500'}`}>POSTS</button>
+          <button onClick={() => setActiveTab('videos')} className={`flex-1 py-4 text-[9px] font-black uppercase ${activeTab === 'videos' ? 'border-b-2 border-white text-white' : 'text-gray-500'}`}>PULSOS</button>
           <button onClick={() => setActiveTab('reposts')} className={`flex-1 py-4 text-[9px] font-black uppercase ${activeTab === 'reposts' ? 'border-b-2 border-white text-white' : 'text-gray-500'}`}>REPOSTS</button>
         </div>
 
@@ -209,24 +222,23 @@ const Profile: React.FC<ProfileProps> = ({
 
       {isEditing && (
         <div className="fixed inset-0 z-[500] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/90 backdrop-blur-xl" onClick={() => setIsEditing(false)} />
+          <div className="absolute inset-0 bg-black/95 backdrop-blur-xl" onClick={() => setIsEditing(false)} />
           <div className="relative w-full max-w-lg bg-[#0d0d0d] rounded-[2.5rem] p-8 border border-white/10 max-h-[85vh] overflow-y-auto no-scrollbar">
-            <h3 className="text-xl font-black italic uppercase mb-8">Identidade</h3>
+            <h3 className="text-xl font-black italic uppercase mb-8">Editar Identidade</h3>
             {error && <div className="bg-rose-600/20 text-rose-500 text-[9px] font-black p-4 rounded-xl mb-6 uppercase border border-rose-500/20">{error}</div>}
             
             <div className="space-y-6">
               <div className="flex flex-col items-center gap-4 mb-4">
-                 <div className="w-24 h-24 rounded-[1.5rem] bg-white/5 border border-white/10 overflow-hidden relative group cursor-pointer" onClick={() => photoInputRef.current?.click()}>
+                 <div className="w-24 h-24 rounded-[2rem] bg-white/5 border border-white/10 overflow-hidden relative group cursor-pointer" onClick={() => photoInputRef.current?.click()}>
                     {editForm.avatar ? <img src={editForm.avatar} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center opacity-40">FOTO</div>}
                     <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-[8px] font-black">TROCAR</div>
                  </div>
                  <input type="file" ref={photoInputRef} className="hidden" accept="image/*" onChange={handlePhotoChange} />
               </div>
 
-              {/* SOMENTE ADMINS PODEM MUDAR A COR */}
               {user.isAdmin && (
                 <div className="space-y-2">
-                  <label className="text-[8px] font-black text-gray-500 uppercase ml-1">Cor do Perfil (Admin Only)</label>
+                  <label className="text-[8px] font-black text-gray-500 uppercase ml-1">Cor do Tema (Admin)</label>
                   <input 
                     type="color" 
                     value={editForm.profileColor || '#000000'} 
@@ -261,7 +273,7 @@ const Profile: React.FC<ProfileProps> = ({
               </div>
 
               <div className="space-y-2">
-                <label className="text-[8px] font-black text-gray-500 uppercase ml-1">Biografia</label>
+                <label className="text-[8px] font-black text-gray-500 uppercase ml-1">Bio</label>
                 <textarea 
                   maxLength={200} 
                   value={editForm.bio} 
@@ -271,8 +283,10 @@ const Profile: React.FC<ProfileProps> = ({
               </div>
             </div>
             <div className="mt-10 space-y-3">
-              <button onClick={handleSaveProfile} className="w-full bg-white text-black py-4 rounded-2xl font-black text-[10px] uppercase shadow-xl">Salvar</button>
-              <button onClick={onLogout} className="w-full border border-rose-500/20 text-rose-500 py-4 rounded-2xl font-black text-[10px] uppercase">Sair da Conta</button>
+              <button onClick={handleSaveProfile} disabled={isSaving} className="w-full bg-white text-black py-4 rounded-2xl font-black text-[10px] uppercase shadow-xl disabled:opacity-50">
+                {isSaving ? 'SALVANDO...' : 'SALVAR'}
+              </button>
+              <button onClick={onLogout} className="w-full border border-rose-500/20 text-rose-500 py-4 rounded-2xl font-black text-[10px] uppercase">SAIR DA CONTA</button>
             </div>
           </div>
         </div>
@@ -284,12 +298,12 @@ const Profile: React.FC<ProfileProps> = ({
         title={listDrawer.type === 'followers' ? 'Seguidores' : 'Seguindo'}
         users={listDrawer.type === 'followers' ? followersList : followingList}
         onUserClick={onNavigateToProfile}
-        emptyMessage={listDrawer.type === 'followers' ? "Ninguém seguindo ainda." : "Não está seguindo ninguém."}
+        emptyMessage={listDrawer.type === 'followers' ? "Ninguém te seguindo ainda." : "Não está seguindo ninguém."}
       />
 
       {selectedVideo && (
         <div className="fixed inset-0 z-[600] bg-black">
-          <button onClick={() => setSelectedVideo(null)} className="absolute top-10 left-6 z-[610] bg-white text-black px-5 py-2 rounded-full text-[10px] font-black uppercase shadow-xl">Voltar</button>
+          <button onClick={() => setSelectedVideo(null)} className="absolute top-10 left-6 z-[610] bg-white text-black px-5 py-2 rounded-full text-[10px] font-black uppercase shadow-xl">Fechar</button>
           <VideoPlayer video={selectedVideo} isActive={true} onLike={onLike} onFollow={onFollow} onRepost={onRepost} onNavigateToProfile={onNavigateToProfile} currentUser={currentUser} onAddComment={onAddComment} onDeleteComment={onDeleteComment} onToggleComments={() => {}} onDeleteVideo={onDeleteVideo} isFollowing={!!followingMap[selectedVideo.username]} onLikeComment={onLikeComment} isMuted={isMuted} setIsMuted={setIsMuted} isRepostedByMe={currentUser.repostedVideoIds.includes(selectedVideo.id)} allAccounts={allAccountsData.map(a => a.profile)} />
         </div>
       )}
