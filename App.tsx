@@ -22,7 +22,6 @@ interface AccountData {
   password?: string;
 }
 
-const MASTER_ADMIN_EMAIL = 'davielucas914@gmail.com';
 const SESSION_KEY = 'CORE_SESSION_ACTIVE';
 const ACTIVE_USER_KEY = 'CORE_ACTIVE_USERNAME';
 
@@ -36,6 +35,7 @@ const App: React.FC = () => {
   const [accounts, setAccounts] = useState<AccountData[]>([]);
   const [currentUsername, setCurrentUsername] = useState<string | null>(localStorage.getItem(ACTIVE_USER_KEY));
 
+  // INICIALIZAÇÃO ROBUSTA: Busca dados remotos e restaura sessão
   useEffect(() => {
     const initializeApp = async () => {
       setIsLoading(true);
@@ -56,31 +56,34 @@ const App: React.FC = () => {
           if (userExists) {
             setCurrentUsername(savedUsername);
             setIsLoggedIn(true);
+          } else {
+            // Se o usuário foi deletado do banco mas estava no localstorage
+            localStorage.removeItem(SESSION_KEY);
+            localStorage.removeItem(ACTIVE_USER_KEY);
           }
         }
       } catch (error) {
+        console.error("Erro na inicialização:", error);
       } finally {
         setIsLoading(false);
       }
     };
     initializeApp();
 
-    // Sincronização periódica de dados (Polloing leve para status online)
     const interval = setInterval(async () => {
       const profiles = await databaseService.getProfiles();
       if (profiles.length > 0) setAccounts(profiles);
-    }, 60000); // 1 minuto
+    }, 60000);
 
     return () => clearInterval(interval);
   }, []);
 
-  // HEARTBEAT: Avisa que o usuário está online
   useEffect(() => {
     if (isLoggedIn && currentUsername) {
       databaseService.updatePresence(currentUsername);
       const heartbeat = setInterval(() => {
         databaseService.updatePresence(currentUsername);
-      }, 30000); // 30 segundos
+      }, 30000);
       return () => clearInterval(heartbeat);
     }
   }, [isLoggedIn, currentUsername]);
@@ -92,7 +95,7 @@ const App: React.FC = () => {
 
   const handleUpdateAccountStats = useCallback((username: string, stats: any) => {
     setAccounts(prev => {
-      return prev.map(a => {
+      const updatedList = prev.map(a => {
         if (a.profile.username === username) {
           const updated = { 
             ...a, 
@@ -105,13 +108,14 @@ const App: React.FC = () => {
         }
         return a;
       });
+      return updatedList;
     });
   }, []);
 
   const handleLogout = () => {
     setIsLoggedIn(false);
     setCurrentUsername(null);
-    localStorage.setItem(SESSION_KEY, 'false');
+    localStorage.removeItem(SESSION_KEY);
     localStorage.removeItem(ACTIVE_USER_KEY);
     setActiveTab('home');
   };
@@ -127,7 +131,7 @@ const App: React.FC = () => {
     return (
       <div className="h-screen bg-black flex flex-col items-center justify-center">
         <div className="w-12 h-12 border-4 border-white/10 border-t-white rounded-full animate-spin mb-6"></div>
-        <p className="text-[10px] font-black uppercase tracking-[0.5em] animate-pulse text-white/40">Conectando ao Core...</p>
+        <p className="text-[10px] font-black uppercase tracking-[0.5em] text-white/40">Sincronizando com a Nuvem...</p>
       </div>
     );
   }
@@ -136,10 +140,12 @@ const App: React.FC = () => {
     return (
       <Auth 
         onLogin={async (id, isNew, pass, rand) => {
-          const existingIdx = accounts.findIndex(a => a.email.toLowerCase() === id.toLowerCase() || a.profile.username.toLowerCase() === id.toLowerCase());
+          const existingIdx = accounts.findIndex(a => 
+            a.email.toLowerCase() === id.toLowerCase() || 
+            a.profile.username.toLowerCase() === id.toLowerCase()
+          );
           
           if (isNew && rand && existingIdx === -1) {
-            const isMaster = id.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase();
             const newAcc: AccountData = { 
               email: id, 
               password: pass, 
@@ -147,7 +153,7 @@ const App: React.FC = () => {
               profile: { 
                 ...rand, email: id, bio: 'Novo explorador no CoreStream', avatar: '', 
                 followers: 0, following: 0, likes: 0, repostedVideoIds: [], 
-                notifications: [], isVerified: isMaster, isAdmin: isMaster, isBanned: false,
+                notifications: [], isVerified: false, isAdmin: false, isBanned: false,
                 profileColor: '#000000', lastSeen: Date.now()
               } 
             };
@@ -197,15 +203,8 @@ const App: React.FC = () => {
         {activeTab === 'switcher' && (
           <AccountSwitcher 
             accounts={accounts.map(a => a.profile)} 
-            onSelect={u => { 
-              handleLoginSuccess(u);
-              setActiveTab('home'); 
-            }} 
-            onAddAccount={() => { 
-              setIsLoggedIn(false); 
-              localStorage.setItem(SESSION_KEY, 'false');
-              setActiveTab('home'); 
-            }} 
+            onSelect={u => { handleLoginSuccess(u); setActiveTab('home'); }} 
+            onAddAccount={() => { handleLogout(); }} 
             onDeleteAccount={() => {}} 
             onBack={() => setActiveTab('profile')} 
           />

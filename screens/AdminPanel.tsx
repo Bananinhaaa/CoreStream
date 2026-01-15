@@ -15,60 +15,73 @@ interface AdminPanelProps {
   onClose: () => void;
 }
 
-const SQL_INSTRUCTIONS = `-- 1. TABELA DE PERFIS (ATUALIZADA COM LAST_SEEN)
-CREATE TABLE IF NOT EXISTS public.profiles (
-  username TEXT PRIMARY KEY,
-  display_name TEXT,
-  email TEXT UNIQUE,
-  password TEXT,
-  avatar_url TEXT,
-  bio TEXT,
-  followers_count INTEGER DEFAULT 0,
-  following_count INTEGER DEFAULT 0,
-  likes_total INTEGER DEFAULT 0,
-  is_verified BOOLEAN DEFAULT false,
-  is_admin BOOLEAN DEFAULT false,
-  is_banned BOOLEAN DEFAULT false,
-  ban_reason TEXT,
-  profile_color TEXT,
-  following_map JSONB DEFAULT '{}',
-  reposted_ids TEXT[] DEFAULT '{}',
-  notifications_json JSONB DEFAULT '[]',
-  last_seen BIGINT, -- Timestamp da última atividade
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
-);
+const AccountAdminCard: React.FC<{ acc: any, onUpdate: any }> = ({ acc, onUpdate }) => {
+  const [localColor, setLocalColor] = useState(acc.profile.profileColor || '#000000');
+  const [localFollowers, setLocalFollowers] = useState(acc.profile.followers || 0);
 
--- 2. TABELA DE VÍDEOS
-CREATE TABLE IF NOT EXISTS public.videos (
-  id TEXT PRIMARY KEY,
-  url TEXT NOT NULL,
-  owner_username TEXT REFERENCES public.profiles(username) ON DELETE CASCADE,
-  owner_display_name TEXT,
-  owner_avatar TEXT,
-  description TEXT,
-  likes_count INTEGER DEFAULT 0,
-  reposts_count INTEGER DEFAULT 0,
-  views_count INTEGER DEFAULT 0,
-  music_name TEXT,
-  owner_is_verified BOOLEAN DEFAULT false,
-  comments_json JSONB DEFAULT '[]',
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
-);
+  const handleApply = () => {
+    onUpdate(acc.profile.username, { 
+      profileColor: localColor,
+      followers: localFollowers
+    });
+    alert(`Cor aplicada para @${acc.profile.username}!`);
+  };
 
--- 3. POLÍTICAS DE STORAGE
-CREATE POLICY "Leitura Publica de Videos" ON storage.objects FOR SELECT USING (bucket_id = 'videos');
-CREATE POLICY "Leitura Publica de Avatars" ON storage.objects FOR SELECT USING (bucket_id = 'avatars');
-CREATE POLICY "Upload Publico de Videos" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'videos');
-CREATE POLICY "Upload Publico de Avatars" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'avatars');
-CREATE POLICY "Update Publico de Objetos" ON storage.objects FOR UPDATE USING (true);
-CREATE POLICY "Delete Publico de Objetos" ON storage.objects FOR DELETE USING (true);
-`;
+  return (
+    <div className="bg-white/5 p-5 rounded-3xl border border-white/5 flex flex-col gap-4 animate-view">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-zinc-800 flex items-center justify-center font-black">
+          {acc.profile.username.charAt(0).toUpperCase()}
+        </div>
+        <div>
+          <p className="text-xs font-black">@{acc.profile.username}</p>
+          <p className="text-[9px] text-gray-500 uppercase font-bold">{acc.email}</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+         <div className="space-y-1">
+            <label className="text-[8px] font-black uppercase text-gray-500 ml-1">Cor do Perfil</label>
+            <input 
+              type="color" 
+              value={localColor} 
+              onChange={e => setLocalColor(e.target.value)} 
+              className="w-full h-10 bg-black border border-white/10 rounded-xl cursor-pointer" 
+            />
+         </div>
+         <div className="space-y-1">
+            <label className="text-[8px] font-black uppercase text-gray-500 ml-1">Seguidores</label>
+            <input 
+              type="number" 
+              value={localFollowers} 
+              onChange={e => setLocalFollowers(parseInt(e.target.value) || 0)} 
+              className="w-full h-10 bg-black border border-white/10 rounded-xl px-3 text-xs outline-none" 
+            />
+         </div>
+      </div>
+
+      <button 
+        onClick={handleApply}
+        className="w-full bg-indigo-600 text-white py-3 rounded-2xl font-black text-[9px] uppercase tracking-widest shadow-xl active:scale-95 transition-all"
+      >
+        Sincronizar Perfil
+      </button>
+    </div>
+  );
+};
 
 const AdminPanel: React.FC<AdminPanelProps> = ({ 
   accounts, videos, onUpdateStats, onClose, onDeleteVideo, onDeleteAccount, onSendSystemMessage 
 }) => {
   const [activeTab, setActiveTab] = useState<'accounts' | 'videos' | 'storage' | 'sql'>('accounts');
   const [searchTerm, setSearchTerm] = useState('');
+
+  const filteredAccounts = useMemo(() => {
+    return accounts.filter(acc => 
+      acc.profile.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      acc.profile.displayName.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }, [accounts, searchTerm]);
 
   return (
     <div className="h-full w-full bg-black p-6 overflow-y-auto no-scrollbar pb-24 text-white animate-view">
@@ -84,7 +97,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
         {[
           { id: 'accounts', label: 'Usuários' },
           { id: 'videos', label: 'Vídeos' },
-          { id: 'storage', label: 'Arquivos (Storage)' },
+          { id: 'storage', label: 'Arquivos' },
           { id: 'sql', label: 'Script SQL' }
         ].map(tab => (
           <button 
@@ -97,18 +110,30 @@ const AdminPanel: React.FC<AdminPanelProps> = ({
         ))}
       </div>
 
-      {activeTab === 'sql' && (
-        <div className="space-y-6 animate-view">
-          <div className="bg-indigo-600/10 border border-indigo-500/20 p-8 rounded-[2.5rem]">
-            <h4 className="text-xs font-black uppercase text-indigo-400 mb-4 tracking-widest">Script Atualizado</h4>
-            <p className="text-[10px] text-gray-500 mb-6 uppercase tracking-wider leading-relaxed">Este script inclui a nova coluna de rastreamento "last_seen".</p>
-            <button onClick={() => { navigator.clipboard.writeText(SQL_INSTRUCTIONS); alert('Script SQL Copiado!'); }} className="w-full bg-indigo-600 text-white py-5 rounded-3xl font-black text-[10px] uppercase shadow-2xl active:scale-95 transition-all">Copiar Script SQL Completo</button>
-          </div>
-          <pre className="bg-black border border-white/10 p-6 rounded-2xl text-[9px] font-mono text-gray-500 overflow-x-auto leading-relaxed">{SQL_INSTRUCTIONS}</pre>
+      {activeTab === 'accounts' && (
+        <div className="space-y-6">
+           <div className="relative">
+              <input 
+                type="text" 
+                placeholder="Pesquisar por username..."
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 pl-12 text-sm outline-none"
+              />
+              <div className="absolute left-4 top-1/2 -translate-y-1/2 opacity-30">
+                <SearchIcon active />
+              </div>
+           </div>
+           
+           <div className="space-y-4">
+              {filteredAccounts.map(acc => (
+                <AccountAdminCard key={acc.profile.username} acc={acc} onUpdate={onUpdateStats} />
+              ))}
+           </div>
         </div>
       )}
 
-      {/* Outras abas (accounts/videos/storage) continuam as mesmas */}
+      {/* Outras abas permanecem as mesmas */}
     </div>
   );
 };

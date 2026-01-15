@@ -11,7 +11,6 @@ export const supabase = (supabaseUrl && supabaseAnonKey && supabaseUrl !== 'unde
   : null;
 
 const LOCAL_VIDEOS_KEY = 'CORE_STORAGE_VIDEOS_V3';
-const LOCAL_PROFILES_KEY = 'CORE_STORAGE_PROFILES_V3';
 
 export const BUCKETS = {
   VIDEOS: 'videos',
@@ -45,14 +44,7 @@ export const databaseService = {
   },
 
   async getVideos(): Promise<Video[]> {
-    let localVideos: Video[] = [];
-    try {
-      const saved = localStorage.getItem(LOCAL_VIDEOS_KEY);
-      localVideos = saved ? JSON.parse(saved) : [];
-    } catch (e) {}
-
-    if (!supabase) return localVideos.length > 0 ? localVideos : INITIAL_VIDEOS;
-
+    if (!supabase) return INITIAL_VIDEOS;
     try {
       const { data, error } = await supabase
         .from('videos')
@@ -60,11 +52,9 @@ export const databaseService = {
         .order('created_at', { ascending: false });
       
       if (error) throw error;
-      const remoteVideos = data && data.length > 0 ? data.map(this.mapVideo) : INITIAL_VIDEOS;
-      localStorage.setItem(LOCAL_VIDEOS_KEY, JSON.stringify(remoteVideos));
-      return remoteVideos;
+      return data && data.length > 0 ? data.map(this.mapVideo) : INITIAL_VIDEOS;
     } catch (error) {
-      return localVideos.length > 0 ? localVideos : INITIAL_VIDEOS;
+      return INITIAL_VIDEOS;
     }
   },
 
@@ -129,13 +119,14 @@ export const databaseService = {
           isVerified: p.is_verified,
           isAdmin: p.is_admin,
           isBanned: p.is_banned,
-          profileColor: p.profile_color,
+          profileColor: p.profile_color, // PERSISTÊNCIA DA COR
           repostedVideoIds: p.reposted_ids || [],
           notifications: p.notifications_json || [],
           lastSeen: p.last_seen
         }
       }));
     } catch (error) {
+      console.error("Erro ao carregar perfis:", error);
       return [];
     }
   },
@@ -144,7 +135,7 @@ export const databaseService = {
     if (!supabase) return;
     try {
       const p = account.profile;
-      await supabase.from('profiles').upsert({
+      const { error } = await supabase.from('profiles').upsert({
         username: p.username,
         display_name: p.displayName,
         email: p.email,
@@ -157,12 +148,15 @@ export const databaseService = {
         is_verified: p.isVerified,
         is_admin: p.isAdmin,
         is_banned: p.isBanned,
-        profile_color: p.profileColor,
+        profile_color: p.profileColor, // SALVANDO A COR NO BANCO
         following_map: account.followingMap,
         reposted_ids: p.repostedVideoIds,
         notifications_json: p.notifications,
         last_seen: Date.now()
       }, { onConflict: 'username' });
-    } catch (error) {}
+      if (error) throw error;
+    } catch (error) {
+      console.error("Erro ao salvar perfil:", error);
+    }
   }
 };
