@@ -24,28 +24,30 @@ const Auth: React.FC<AuthProps> = ({ onLogin, registeredAccounts }) => {
 
   const handleAction = (isSignup: boolean) => {
     setError('');
+    const idClean = identifier.toLowerCase().trim();
     
     if (isSignup) {
-      if (!identifier || !password || !signupUser || !signupDisplay) return setError('Preencha todos os campos.');
+      if (!idClean || !password || !signupUser || !signupDisplay) return setError('Preencha todos os campos.');
       if (!validate(signupUser)) return setError('Username: 3-20 letras ou números.');
       if (password.length < 3) return setError('Senha muito curta.');
       
-      // VERIFICAÇÃO DE CONTA EXISTENTE
-      const emailExists = registeredAccounts.some(a => a.email.toLowerCase() === identifier.toLowerCase());
+      const emailExists = registeredAccounts.some(a => a.email.toLowerCase() === idClean);
       const userExists = registeredAccounts.some(a => a.username.toLowerCase() === signupUser.toLowerCase());
       
       if (emailExists || userExists) {
-        return setError('ESTA CONTA JÁ FOI FEITA');
+        return setError('Este e-mail ou username já está em uso. Tente fazer login.');
       }
 
-      onLogin(identifier, true, password, { username: signupUser, displayName: signupDisplay });
+      onLogin(idClean, true, password, { username: signupUser, displayName: signupDisplay });
     } else {
+      if (!idClean || !password) return setError('Preencha e-mail e senha.');
+      
       const acc = registeredAccounts.find(a => 
-        (a.email.toLowerCase() === identifier.toLowerCase() || a.username.toLowerCase() === identifier.toLowerCase()) && 
+        (a.email.toLowerCase() === idClean || a.username.toLowerCase() === idClean) && 
         a.password === password
       );
       
-      if (!acc) return setError('E-mail ou senha incorretos.');
+      if (!acc) return setError('Credenciais incorretas ou conta ainda não sincronizada.');
       onLogin(acc.email, false, password);
     }
   };
@@ -62,6 +64,9 @@ const Auth: React.FC<AuthProps> = ({ onLogin, registeredAccounts }) => {
           <button onClick={() => setMode('signup')} className="w-full bg-white text-black h-16 rounded-[2rem] font-black text-xs shadow-xl active:scale-95 transition-transform">CRIAR CONTA</button>
           <button onClick={() => setMode('login')} className="w-full border border-white/10 text-white h-16 rounded-[2rem] font-black text-xs active:scale-95 transition-transform">ENTRAR</button>
         </div>
+        {registeredAccounts.length === 0 && (
+          <p className="mt-8 text-[8px] text-gray-500 uppercase tracking-widest opacity-50">Nenhuma conta detectada. Verifique sua conexão.</p>
+        )}
       </div>
     );
   }
@@ -84,13 +89,13 @@ const Auth: React.FC<AuthProps> = ({ onLogin, registeredAccounts }) => {
         
         <div className="space-y-5">
           <div className="space-y-1">
-            <label className="text-[8px] font-black text-gray-600 uppercase ml-1">E-mail</label>
+            <label className="text-[8px] font-black text-gray-600 uppercase ml-1">{mode === 'signup' ? 'E-mail' : 'E-mail ou Username'}</label>
             <input 
-              type="email" 
+              type="text" 
               value={identifier} 
-              onChange={e => setIdentifier(e.target.value.toLowerCase().trim())} 
+              onChange={e => setIdentifier(e.target.value)} 
               className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-sm outline-none focus:border-white transition-all" 
-              placeholder="exemplo@email.com"
+              placeholder={mode === 'signup' ? "exemplo@email.com" : "usuario ou email"}
             />
           </div>
 

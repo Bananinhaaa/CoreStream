@@ -24,27 +24,25 @@ interface AccountData {
 
 const MASTER_ADMIN_EMAIL = 'davielucas914@gmail.com';
 const SESSION_KEY = 'CORE_SESSION_ACTIVE';
-const ACTIVE_INDEX_KEY = 'CORE_ACTIVE_ACCOUNT_IDX';
+const ACTIVE_USER_KEY = 'CORE_ACTIVE_USERNAME';
 const AUTO_CONNECT_KEY = 'CORE_AUTO_CONNECT';
 
 const App: React.FC = () => {
-  const [isLoggedIn, setIsLoggedIn] = useState(() => localStorage.getItem(SESSION_KEY) === 'true');
   const [activeTab, setActiveTab] = useState<Tab>('home');
   const [viewingUser, setViewingUser] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [videos, setVideos] = useState<Video[]>([]);
   const [accounts, setAccounts] = useState<AccountData[]>([]);
+  const [currentUsername, setCurrentUsername] = useState<string | null>(localStorage.getItem(ACTIVE_USER_KEY));
 
-  const [currentAccountIndex, setCurrentAccountIndex] = useState(() => {
-    const saved = localStorage.getItem(ACTIVE_INDEX_KEY);
-    return saved ? parseInt(saved) : 0;
-  });
-
+  // CARREGAMENTO E CONEXÃO AUTOMÁTICA
   useEffect(() => {
-    const loadGlobalData = async () => {
+    const initializeApp = async () => {
       setIsLoading(true);
       try {
+        // Busca dados globais (Sincronização com Supabase se as chaves existirem)
         const [globalVideos, globalProfiles] = await Promise.all([
           databaseService.getVideos(),
           databaseService.getProfiles()
@@ -53,38 +51,34 @@ const App: React.FC = () => {
         setVideos(globalVideos);
         setAccounts(globalProfiles);
 
-        if (globalProfiles.length > 0) {
-          const hasSession = localStorage.getItem(SESSION_KEY) === 'true';
-          const autoConnect = localStorage.getItem(AUTO_CONNECT_KEY) !== 'false';
+        const wasLoggedIn = localStorage.getItem(SESSION_KEY) === 'true';
+        const savedUsername = localStorage.getItem(ACTIVE_USER_KEY);
 
-          if (hasSession || autoConnect) {
-            const savedIdx = localStorage.getItem(ACTIVE_INDEX_KEY);
-            const idx = savedIdx ? parseInt(savedIdx) : 0;
-            
-            if (idx >= 0 && idx < globalProfiles.length) {
-              setCurrentAccountIndex(idx);
-              setIsLoggedIn(true);
-              localStorage.setItem(SESSION_KEY, 'true');
-              localStorage.setItem(AUTO_CONNECT_KEY, 'true');
-            }
+        if (wasLoggedIn && savedUsername) {
+          const userExists = globalProfiles.find(a => a.profile.username === savedUsername);
+          if (userExists) {
+            setCurrentUsername(savedUsername);
+            setIsLoggedIn(true);
+          } else {
+            // Se o usuário não existe mais no banco (foi deletado), limpa sessão
+            handleLogout();
           }
         }
       } catch (error) {
-        console.error("Erro ao carregar dados:", error);
+        console.error("Erro na inicialização:", error);
       } finally {
         setIsLoading(false);
       }
     };
-    loadGlobalData();
+    initializeApp();
   }, []);
 
   const activeAccount = useMemo(() => {
-    if (accounts.length === 0) return null;
-    const safeIdx = currentAccountIndex >= 0 && currentAccountIndex < accounts.length ? currentAccountIndex : 0;
-    return accounts[safeIdx];
-  }, [accounts, currentAccountIndex]);
+    if (!currentUsername || accounts.length === 0) return null;
+    return accounts.find(a => a.profile.username === currentUsername) || null;
+  }, [accounts, currentUsername]);
 
-  const handleUpdateAccountStats = (username: string, stats: Partial<UserProfile> & { password?: string, email?: string }) => {
+  const handleUpdateAccountStats = useCallback((username: string, stats: Partial<UserProfile> & { password?: string, email?: string }) => {
     setAccounts(prev => {
       const newAccounts = prev.map(a => {
         if (a.profile.username === username) {
@@ -101,28 +95,30 @@ const App: React.FC = () => {
       });
       return newAccounts;
     });
-  };
+  }, []);
 
   const handleLogout = () => {
     setIsLoggedIn(false);
+    setCurrentUsername(null);
     localStorage.setItem(SESSION_KEY, 'false');
+    localStorage.removeItem(ACTIVE_USER_KEY);
     localStorage.setItem(AUTO_CONNECT_KEY, 'false');
     setActiveTab('home');
   };
 
-  const handleLoginSuccess = (idx: number) => {
-    setCurrentAccountIndex(idx);
+  const handleLoginSuccess = (username: string) => {
+    setCurrentUsername(username);
     setIsLoggedIn(true);
     localStorage.setItem(SESSION_KEY, 'true');
-    localStorage.setItem(ACTIVE_INDEX_KEY, idx.toString());
+    localStorage.setItem(ACTIVE_USER_KEY, username);
     localStorage.setItem(AUTO_CONNECT_KEY, 'true');
   };
 
   if (isLoading) {
     return (
       <div className="h-screen bg-black flex flex-col items-center justify-center">
-        <div className="w-10 h-10 border-4 border-white/20 border-t-white rounded-full animate-spin mb-4"></div>
-        <p className="text-[10px] font-black uppercase tracking-[0.5em] animate-pulse">CoreStream: Pulso Ativo...</p>
+        <div className="w-12 h-12 border-4 border-white/10 border-t-white rounded-full animate-spin mb-6"></div>
+        <p className="text-[10px] font-black uppercase tracking-[0.5em] animate-pulse text-white/40">Sincronizando Core...</p>
       </div>
     );
   }
@@ -131,8 +127,9 @@ const App: React.FC = () => {
     return (
       <Auth 
         onLogin={async (id, isNew, pass, rand) => {
-          const idx = accounts.findIndex(a => a.email.toLowerCase() === id.toLowerCase() || a.profile.username.toLowerCase() === id.toLowerCase());
-          if (isNew && rand && idx === -1) {
+          const existingIdx = accounts.findIndex(a => a.email.toLowerCase() === id.toLowerCase() || a.profile.username.toLowerCase() === id.toLowerCase());
+          
+          if (isNew && rand && existingIdx === -1) {
             const isMaster = id.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase();
             const newAcc: AccountData = { 
               email: id, 
@@ -146,30 +143,17 @@ const App: React.FC = () => {
               } 
             };
             await databaseService.saveProfile(newAcc);
-            setAccounts(prev => {
-              const updated = [...prev, newAcc];
-              handleLoginSuccess(updated.length - 1);
-              return updated;
-            });
-          } else if (idx !== -1) {
-            handleLoginSuccess(idx);
+            setAccounts(prev => [...prev, newAcc]);
+            handleLoginSuccess(newAcc.profile.username);
+          } else if (existingIdx !== -1) {
+            const acc = accounts[existingIdx];
+            if (!pass || acc.password === pass) {
+              handleLoginSuccess(acc.profile.username);
+            }
           }
         }} 
         registeredAccounts={accounts.map(a => ({ email: a.email, username: a.profile.username, password: a.password }))} 
       />
-    );
-  }
-
-  if (activeAccount.profile.isBanned) {
-    return (
-      <div className="h-screen bg-black flex flex-col items-center justify-center p-10 text-center animate-view">
-         <div className="w-24 h-24 bg-rose-600 rounded-[2.5rem] mb-8 flex items-center justify-center shadow-2xl shadow-rose-600/20">
-            <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" strokeWidth="2.5"/></svg>
-         </div>
-         <h1 className="text-4xl font-black italic uppercase tracking-tighter text-rose-500 mb-4">Acesso Negado</h1>
-         <p className="text-sm text-gray-500 max-w-xs leading-relaxed mb-12">Esta conta foi suspensa permanentemente por violar as diretrizes do CoreStream.</p>
-         <button onClick={handleLogout} className="bg-white text-black px-10 py-5 rounded-3xl font-black text-xs uppercase tracking-widest shadow-xl">Sair da Conta</button>
-      </div>
     );
   }
 
@@ -197,7 +181,7 @@ const App: React.FC = () => {
             onUpdateVideoStats={() => {}} 
             onDeleteAccount={() => {}}
             onDeleteVideo={() => {}}
-            onSendSystemMessage={(t, m) => {}} 
+            onSendSystemMessage={() => {}} 
             onClose={() => setActiveTab('profile')} 
           />
         )}
@@ -205,8 +189,7 @@ const App: React.FC = () => {
           <AccountSwitcher 
             accounts={accounts.map(a => a.profile)} 
             onSelect={u => { 
-              const idx = accounts.findIndex(a => a.profile.username === u); 
-              handleLoginSuccess(idx);
+              handleLoginSuccess(u);
               setActiveTab('home'); 
             }} 
             onAddAccount={() => { 

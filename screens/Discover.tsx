@@ -29,6 +29,7 @@ const Discover: React.FC<DiscoverProps> = ({ videos, onNavigateToProfile, curren
   }, [searchTerm, videos]);
 
   const filteredUsers = useMemo(() => {
+    // Retorna todos se não houver busca
     if (!searchTerm.trim()) return allAccounts;
     const term = searchTerm.toLowerCase();
     return allAccounts.filter(acc => 
@@ -39,7 +40,7 @@ const Discover: React.FC<DiscoverProps> = ({ videos, onNavigateToProfile, curren
 
   return (
     <div className="h-full animate-view overflow-y-auto no-scrollbar pb-24 bg-black">
-      <header className="p-8 pb-6 sticky top-0 bg-black/90 backdrop-blur-2xl z-50 border-b border-white/5">
+      <header className="p-8 pb-6 sticky top-0 bg-black/95 backdrop-blur-2xl z-50 border-b border-white/5">
         <h2 className="text-3xl font-black mb-6 tracking-tighter italic uppercase">Explore</h2>
         <div className="relative">
           <input 
@@ -91,23 +92,21 @@ const Discover: React.FC<DiscoverProps> = ({ videos, onNavigateToProfile, curren
                 onClick={() => onNavigateToProfile(acc.profile.username)} 
                 className="flex flex-col items-center gap-2 cursor-pointer group animate-view"
               >
-                <div className="relative w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden transition-transform group-active:scale-90 shadow-lg">
+                <div className="relative w-16 h-16 rounded-2xl bg-zinc-900 border border-white/10 flex items-center justify-center overflow-hidden transition-transform group-active:scale-90 shadow-lg">
                   {acc.profile.avatar ? (
                     <img src={acc.profile.avatar} className="w-full h-full object-cover" />
                   ) : (
-                    <span className="font-black text-2xl text-white opacity-40">{acc.profile.username.charAt(0).toUpperCase()}</span>
+                    <span className="font-black text-xl text-white/20">{acc.profile.username.charAt(0).toUpperCase()}</span>
                   )}
                   {acc.profile.isAdmin && (
-                    <div className="absolute top-0 right-0 p-1 bg-indigo-600 rounded-bl-lg">
-                      <div className="w-1.5 h-1.5 bg-white rounded-full"></div>
-                    </div>
+                    <div className="absolute top-1 right-1 w-2 h-2 bg-indigo-500 rounded-full shadow-[0_0_8px_rgba(99,102,241,0.8)]"></div>
                   )}
                 </div>
-                <div className="flex flex-col items-center w-full px-1 overflow-hidden">
-                  <span className="text-[8px] font-black text-white uppercase truncate w-full text-center flex items-center justify-center gap-0.5">
+                <div className="flex flex-col items-center w-full px-1 overflow-hidden text-center">
+                  <span className="text-[8px] font-black text-white uppercase truncate w-full flex items-center justify-center gap-0.5">
                     {acc.profile.displayName} {acc.profile.isVerified && <VerifiedBadge size="8" />}
                   </span>
-                  <span className="text-[7px] font-bold text-gray-600 uppercase truncate w-full text-center">@{acc.profile.username}</span>
+                  <span className="text-[7px] font-bold text-gray-600 uppercase truncate w-full">@{acc.profile.username}</span>
                 </div>
               </div>
             ))}
@@ -133,16 +132,13 @@ const Discover: React.FC<DiscoverProps> = ({ videos, onNavigateToProfile, curren
                   <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent" />
                   <div className="absolute bottom-4 left-4 right-4">
                     <p className="text-[10px] font-black text-white truncate mb-1">@{video.username} {video.isVerified && <VerifiedBadge size="10" />}</p>
-                    <p className="text-[8px] text-white/40 line-clamp-1">{video.description}</p>
+                    <p className="text-[8px] text-white/40 line-clamp-1 italic">{video.description}</p>
                   </div>
                 </div>
               ))}
             </div>
           ) : (
             <div className="py-24 text-center bg-white/5 rounded-[2.5rem] border border-white/10 flex flex-col items-center">
-               <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center mb-4">
-                  <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" strokeWidth="2"/></svg>
-               </div>
                <p className="text-[10px] font-black text-gray-700 uppercase tracking-[0.3em]">Nada postado ainda</p>
             </div>
           )}

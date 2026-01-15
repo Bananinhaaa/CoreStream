@@ -3,61 +3,75 @@ import { createClient } from '@supabase/supabase-js';
 import { Video, UserProfile } from '../types';
 import { INITIAL_VIDEOS } from '../constants';
 
+// Tenta pegar as chaves do ambiente VITE
 const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
 
-const supabase = (supabaseUrl && supabaseAnonKey) 
+// Inicialização segura
+const supabase = (supabaseUrl && supabaseAnonKey && supabaseUrl !== 'undefined') 
   ? createClient(supabaseUrl, supabaseAnonKey) 
   : null;
 
-const LOCAL_VIDEOS_KEY = 'CORE_VIDEOS_PERSISTENT_V2';
-const LOCAL_PROFILES_KEY = 'CORE_PROFILES_PERSISTENT_V2';
+const LOCAL_VIDEOS_KEY = 'CORE_STORAGE_VIDEOS_V3';
+const LOCAL_PROFILES_KEY = 'CORE_STORAGE_PROFILES_V3';
 
 export const databaseService = {
   // --- VÍDEOS ---
   async getVideos(): Promise<Video[]> {
-    if (!supabase) {
+    let localVideos: Video[] = [];
+    try {
       const saved = localStorage.getItem(LOCAL_VIDEOS_KEY);
-      return saved ? JSON.parse(saved) : INITIAL_VIDEOS;
-    }
+      localVideos = saved ? JSON.parse(saved) : [];
+    } catch (e) {}
+
+    if (!supabase) return localVideos.length > 0 ? localVideos : INITIAL_VIDEOS;
+
     try {
       const { data, error } = await supabase
         .from('videos')
         .select('*')
         .order('created_at', { ascending: false });
+      
       if (error) throw error;
-      if (data && data.length > 0) {
-        return data.map((v: any) => ({
-          id: v.id,
-          url: v.url,
-          username: v.owner_username,
-          displayName: v.owner_display_name || v.owner_username,
-          avatar: v.owner_avatar || '',
-          description: v.description,
-          likes: v.likes_count || 0,
-          comments: v.comments_json || [],
-          reposts: v.reposts_count || 0,
-          views: v.views_count || 0,
-          isLiked: false,
-          isFollowing: false,
-          music: v.music_name || 'Original Audio',
-          isVerified: v.owner_is_verified || false
-        }));
-      }
-      return INITIAL_VIDEOS;
+      
+      const remoteVideos = data && data.length > 0 ? data.map(this.mapVideo) : INITIAL_VIDEOS;
+      
+      // Cache local para offline
+      localStorage.setItem(LOCAL_VIDEOS_KEY, JSON.stringify(remoteVideos));
+      return remoteVideos;
     } catch (error) {
-      console.error("Erro Supabase GetVideos:", error);
-      const saved = localStorage.getItem(LOCAL_VIDEOS_KEY);
-      return saved ? JSON.parse(saved) : INITIAL_VIDEOS;
+      console.warn("Supabase Error, using local fallback:", error);
+      return localVideos.length > 0 ? localVideos : INITIAL_VIDEOS;
     }
   },
 
+  mapVideo(v: any): Video {
+    return {
+      id: v.id,
+      url: v.url,
+      username: v.owner_username,
+      displayName: v.owner_display_name || v.owner_username,
+      avatar: v.owner_avatar || '',
+      description: v.description,
+      likes: v.likes_count || 0,
+      comments: v.comments_json || [],
+      reposts: v.reposts_count || 0,
+      views: v.views_count || 0,
+      isLiked: false,
+      isFollowing: false,
+      music: v.music_name || 'Original Audio',
+      isVerified: v.owner_is_verified || false
+    };
+  },
+
   async saveVideo(video: Video): Promise<void> {
-    // Salva no LocalStorage como backup/primário
-    const saved = localStorage.getItem(LOCAL_VIDEOS_KEY);
-    const videos = saved ? JSON.parse(saved) : [];
-    const updatedVideos = [video, ...videos.filter((v: Video) => v.id !== video.id)];
-    localStorage.setItem(LOCAL_VIDEOS_KEY, JSON.stringify(updatedVideos));
+    // Save locally first
+    try {
+      const saved = localStorage.getItem(LOCAL_VIDEOS_KEY);
+      const videos = saved ? JSON.parse(saved) : [];
+      const updatedVideos = [video, ...videos.filter((v: Video) => v.id !== video.id)];
+      localStorage.setItem(LOCAL_VIDEOS_KEY, JSON.stringify(updatedVideos));
+    } catch (e) {}
 
     if (!supabase) return;
     try {
@@ -76,21 +90,28 @@ export const databaseService = {
         comments_json: video.comments
       }], { onConflict: 'id' });
     } catch (error) {
-      console.error("Erro Supabase SaveVideo:", error);
+      console.error("Erro ao salvar vídeo no Supabase:", error);
     }
   },
 
-  // --- PERFIS (ACCOUNTS) ---
+  // --- PERFIS (Sincronização Global) ---
   async getProfiles(): Promise<any[]> {
+    let profilesLocal: any[] = [];
+    try {
+      const localData = localStorage.getItem(LOCAL_PROFILES_KEY);
+      profilesLocal = localData ? JSON.parse(localData) : [];
+    } catch (e) {}
+
     if (!supabase) {
-      const saved = localStorage.getItem(LOCAL_PROFILES_KEY);
-      return saved ? JSON.parse(saved) : [];
+      console.log("Database: Rodando em modo LOCAL apenas. Configure o Supabase para sincronizar entre dispositivos.");
+      return profilesLocal;
     }
+
     try {
       const { data, error } = await supabase.from('profiles').select('*');
       if (error) throw error;
       
-      const profiles = data.map((p: any) => ({
+      const profilesApi = data.map((p: any) => ({
         email: p.email,
         password: p.password,
         followingMap: p.following_map || {},
@@ -112,22 +133,23 @@ export const databaseService = {
         }
       }));
 
-      // Mantém o localstorage sincronizado com o que veio do banco
-      localStorage.setItem(LOCAL_PROFILES_KEY, JSON.stringify(profiles));
-      return profiles;
+      // Sincroniza o cache local com os dados vindos do servidor (API é a verdade absoluta)
+      localStorage.setItem(LOCAL_PROFILES_KEY, JSON.stringify(profilesApi));
+      return profilesApi;
     } catch (error) {
-      console.error("Erro Supabase GetProfiles:", error);
-      const saved = localStorage.getItem(LOCAL_PROFILES_KEY);
-      return saved ? JSON.parse(saved) : [];
+      console.warn("Database Error, using local profiles:", error);
+      return profilesLocal;
     }
   },
 
   async saveProfile(account: any): Promise<void> {
-    // Salva no LocalStorage como backup/primário
-    const saved = localStorage.getItem(LOCAL_PROFILES_KEY);
-    const profiles = saved ? JSON.parse(saved) : [];
-    const updatedProfiles = [...profiles.filter((p: any) => p.profile.username !== account.profile.username), account];
-    localStorage.setItem(LOCAL_PROFILES_KEY, JSON.stringify(updatedProfiles));
+    // Atualiza cache local
+    try {
+      const saved = localStorage.getItem(LOCAL_PROFILES_KEY);
+      const profiles = saved ? JSON.parse(saved) : [];
+      const updatedProfiles = [...profiles.filter((p: any) => p.profile.username !== account.profile.username), account];
+      localStorage.setItem(LOCAL_PROFILES_KEY, JSON.stringify(updatedProfiles));
+    } catch (e) {}
 
     if (!supabase) return;
     try {
@@ -151,18 +173,7 @@ export const databaseService = {
         notifications_json: p.notifications
       }, { onConflict: 'username' });
     } catch (error) {
-      console.error("Erro Supabase SaveProfile:", error);
+      console.error("Erro ao salvar perfil no Supabase:", error);
     }
-  },
-
-  async updateInteraction(type: 'like' | 'follow' | 'view', targetId: string, userId: string): Promise<void> {
-    if (!supabase) return;
-    try {
-      if (type === 'view') {
-        await supabase.rpc('increment_views', { video_id: targetId });
-      } else if (type === 'like') {
-        await supabase.rpc('increment_likes', { video_id: targetId });
-      }
-    } catch (error) {}
   }
 };
