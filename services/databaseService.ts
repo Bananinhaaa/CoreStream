@@ -10,8 +10,6 @@ export const supabase = (supabaseUrl && supabaseAnonKey && supabaseUrl !== 'unde
   ? createClient(supabaseUrl, supabaseAnonKey) 
   : null;
 
-const LOCAL_VIDEOS_KEY = 'CORE_STORAGE_VIDEOS_V3';
-
 export const BUCKETS = {
   VIDEOS: 'videos',
   AVATARS: 'avatars'
@@ -43,18 +41,18 @@ export const databaseService = {
     } catch (e) {}
   },
 
-  async getVideos(): Promise<Video[]> {
+  async getVideos(): Promise<Video[] | null> {
     if (!supabase) return INITIAL_VIDEOS;
     try {
       const { data, error } = await supabase
         .from('videos')
         .select('*')
         .order('created_at', { ascending: false });
-      
       if (error) throw error;
-      return data && data.length > 0 ? data.map(this.mapVideo) : INITIAL_VIDEOS;
+      return data && data.length > 0 ? data.map(this.mapVideo) : [];
     } catch (error) {
-      return INITIAL_VIDEOS;
+      console.error("Falha ao buscar vídeos:", error);
+      return null;
     }
   },
 
@@ -94,15 +92,16 @@ export const databaseService = {
         owner_is_verified: video.isVerified,
         comments_json: video.comments
       }], { onConflict: 'id' });
-    } catch (error) {}
+    } catch (error) {
+      console.error("Erro ao salvar vídeo:", error);
+    }
   },
 
-  async getProfiles(): Promise<any[]> {
+  async getProfiles(): Promise<any[] | null> {
     if (!supabase) return [];
     try {
       const { data, error } = await supabase.from('profiles').select('*');
       if (error) throw error;
-      
       return data.map((p: any) => ({
         email: p.email,
         password: p.password,
@@ -118,16 +117,17 @@ export const databaseService = {
           likes: p.likes_total || 0,
           isVerified: p.is_verified,
           isAdmin: p.is_admin,
+          isSupport: p.is_support,
           isBanned: p.is_banned,
-          profileColor: p.profile_color, // PERSISTÊNCIA DA COR
+          profileColor: p.profile_color,
           repostedVideoIds: p.reposted_ids || [],
           notifications: p.notifications_json || [],
           lastSeen: p.last_seen
         }
       }));
     } catch (error) {
-      console.error("Erro ao carregar perfis:", error);
-      return [];
+      console.error("Falha ao buscar perfis:", error);
+      return null; 
     }
   },
 
@@ -138,7 +138,7 @@ export const databaseService = {
       const { error } = await supabase.from('profiles').upsert({
         username: p.username,
         display_name: p.displayName,
-        email: p.email,
+        email: account.email || p.email,
         password: account.password,
         bio: p.bio,
         avatar_url: p.avatar,
@@ -147,12 +147,13 @@ export const databaseService = {
         likes_total: p.likes,
         is_verified: p.isVerified,
         is_admin: p.isAdmin,
+        is_support: p.isSupport,
         is_banned: p.isBanned,
-        profile_color: p.profileColor, // SALVANDO A COR NO BANCO
-        following_map: account.followingMap,
-        reposted_ids: p.repostedVideoIds,
-        notifications_json: p.notifications,
-        last_seen: Date.now()
+        profile_color: p.profileColor,
+        following_map: account.followingMap || {},
+        reposted_ids: p.repostedVideoIds || [],
+        notifications_json: p.notifications || [],
+        last_seen: p.lastSeen || Date.now()
       }, { onConflict: 'username' });
       if (error) throw error;
     } catch (error) {

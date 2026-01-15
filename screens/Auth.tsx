@@ -1,5 +1,6 @@
 
 import React, { useState } from 'react';
+import Logo from '../components/Logo';
 
 interface RegisteredAccount {
   email: string;
@@ -55,9 +56,7 @@ const Auth: React.FC<AuthProps> = ({ onLogin, registeredAccounts }) => {
   if (mode === 'landing') {
     return (
       <div className="h-full bg-black flex flex-col items-center justify-center p-8 text-center animate-view">
-        <div className="w-20 h-20 bg-white rounded-[2rem] mb-10 flex items-center justify-center rotate-12 shadow-2xl shadow-white/10">
-          <div className="w-8 h-8 bg-black rounded-lg" />
-        </div>
+        <Logo size={100} className="mb-10 rotate-6" variant="icon" />
         <h1 className="text-6xl font-black italic mb-2 tracking-tighter">CORE</h1>
         <p className="text-gray-600 text-[10px] font-black uppercase tracking-[0.5em] mb-20">O Pulso do Conteúdo</p>
         <div className="w-full max-w-xs space-y-4">
@@ -79,6 +78,7 @@ const Auth: React.FC<AuthProps> = ({ onLogin, registeredAccounts }) => {
         </svg>
       </button>
       <div className="w-full max-w-xs">
+        <Logo size={50} className="mb-8 self-start" />
         <h2 className="text-4xl font-black italic mb-10 uppercase tracking-tighter">{mode === 'signup' ? 'CADASTRO' : 'LOGIN'}</h2>
         
         {error && (

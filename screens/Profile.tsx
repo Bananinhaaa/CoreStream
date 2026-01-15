@@ -26,6 +26,7 @@ interface ProfileProps {
   onSwitchAccount: () => void;
   allAccountsData: any[];
   onOpenAdmin?: () => void;
+  onOpenSupport?: () => void;
   onLikeComment: (vId: string, cId: string) => void;
   isMuted: boolean;
   setIsMuted: (val: boolean) => void;
@@ -40,7 +41,7 @@ const Profile: React.FC<ProfileProps> = ({
   videos, user, onUpdateProfile, onLogout, isOwnProfile, currentUser, 
   onFollow, onLike, onRepost, onAddComment, 
   onDeleteComment, onDeleteVideo,
-  followingMap, onNavigateToProfile, onSwitchAccount, onOpenAdmin, 
+  followingMap, onNavigateToProfile, onSwitchAccount, onOpenAdmin, onOpenSupport,
   onLikeComment, isMuted, setIsMuted, allAccountsData,
   installPrompt, onInstallApp
 }) => {
@@ -123,11 +124,8 @@ const Profile: React.FC<ProfileProps> = ({
   const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      // Feedback visual imediato
       const tempUrl = URL.createObjectURL(file);
       setEditForm(prev => ({ ...prev, avatar: tempUrl }));
-
-      // Upload real para o Supabase
       const fileName = `avatar_${user.username}_${Date.now()}.jpg`;
       const uploadedUrl = await databaseService.uploadFile('avatars', file, fileName);
       if (uploadedUrl) {
@@ -147,19 +145,15 @@ const Profile: React.FC<ProfileProps> = ({
 
   return (
     <div className={`h-full overflow-y-auto no-scrollbar pb-24 text-white ${user.isBanned && !isOwnProfile ? 'opacity-30 pointer-events-none' : ''}`} style={backgroundStyle}>
-      {user.isBanned && !isOwnProfile && (
-         <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-10 text-center">
-            <div className="bg-zinc-900 p-8 rounded-[3rem] border border-rose-500/30">
-               <h3 className="text-rose-500 font-black italic uppercase tracking-widest text-xl mb-2">Pulsar Interrompido</h3>
-               <p className="text-[10px] uppercase font-bold text-gray-500">Esta conta foi removida pela moderação.</p>
-            </div>
-         </div>
-      )}
-
       <div className="h-32 bg-gradient-to-b from-black/40 to-transparent w-full" />
       <div className="px-6 flex flex-col items-center">
         <div className="absolute top-10 right-6 flex gap-2">
-          {isOwnProfile && currentUser.isAdmin && <button onClick={onOpenAdmin} className="p-3 bg-white text-black rounded-2xl font-black text-[9px] uppercase tracking-widest">ADMIN</button>}
+          {isOwnProfile && currentUser.isAdmin && (
+            <>
+              <button onClick={onOpenAdmin} className="p-3 bg-white text-black rounded-2xl font-black text-[9px] uppercase tracking-widest">ADMIN</button>
+              <button onClick={onOpenSupport} className="p-3 bg-indigo-600 text-white rounded-2xl font-black text-[9px] uppercase tracking-widest">SUPORTE</button>
+            </>
+          )}
           {isOwnProfile && <button onClick={onSwitchAccount} className="p-3 bg-white/10 rounded-2xl font-black text-[9px] uppercase tracking-widest border border-white/10">Contas</button>}
         </div>
 
@@ -197,12 +191,6 @@ const Profile: React.FC<ProfileProps> = ({
           ) : (
             <button onClick={() => onFollow(user.username)} className={`w-full py-4 rounded-2xl text-[9px] font-black uppercase tracking-widest ${followingMap[user.username] ? 'bg-white/10 text-white' : 'bg-white text-black'}`}>{followingMap[user.username] ? 'Seguindo' : 'Seguir'}</button>
           )}
-
-          {isOwnProfile && installPrompt && (
-            <button onClick={onInstallApp} className="w-full bg-indigo-600 text-white py-4 rounded-2xl text-[9px] font-black uppercase tracking-[0.2em] shadow-xl">
-              Instalar App 📱
-            </button>
-          )}
         </div>
 
         <div className="w-full flex border-b border-white/10 mt-10">
@@ -225,8 +213,6 @@ const Profile: React.FC<ProfileProps> = ({
           <div className="absolute inset-0 bg-black/95 backdrop-blur-xl" onClick={() => setIsEditing(false)} />
           <div className="relative w-full max-w-lg bg-[#0d0d0d] rounded-[2.5rem] p-8 border border-white/10 max-h-[85vh] overflow-y-auto no-scrollbar">
             <h3 className="text-xl font-black italic uppercase mb-8">Editar Identidade</h3>
-            {error && <div className="bg-rose-600/20 text-rose-500 text-[9px] font-black p-4 rounded-xl mb-6 uppercase border border-rose-500/20">{error}</div>}
-            
             <div className="space-y-6">
               <div className="flex flex-col items-center gap-4 mb-4">
                  <div className="w-24 h-24 rounded-[2rem] bg-white/5 border border-white/10 overflow-hidden relative group cursor-pointer" onClick={() => photoInputRef.current?.click()}>
@@ -236,77 +222,43 @@ const Profile: React.FC<ProfileProps> = ({
                  <input type="file" ref={photoInputRef} className="hidden" accept="image/*" onChange={handlePhotoChange} />
               </div>
 
-              {user.isAdmin && (
-                <div className="space-y-2">
-                  <label className="text-[8px] font-black text-gray-500 uppercase ml-1">Cor do Tema (Admin)</label>
-                  <input 
-                    type="color" 
-                    value={editForm.profileColor || '#000000'} 
-                    onChange={e => setEditForm({...editForm, profileColor: e.target.value})} 
-                    className="w-full h-12 bg-white/5 border border-white/10 rounded-xl cursor-pointer" 
-                  />
-                </div>
-              )}
-
               <div className="space-y-2">
                 <label className="text-[8px] font-black text-gray-500 uppercase ml-1">Username</label>
-                <input 
-                  maxLength={20} 
-                  type="text" 
-                  disabled={!canChangeUsername}
-                  value={editForm.username} 
-                  onChange={e => setEditForm({...editForm, username: e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '')})} 
-                  className={`w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm outline-none ${!canChangeUsername ? 'opacity-30' : 'focus:border-white'}`} 
-                />
+                <input maxLength={20} type="text" disabled={!canChangeUsername} value={editForm.username} onChange={e => setEditForm({...editForm, username: e.target.value.toLowerCase()})} className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm outline-none" />
               </div>
 
               <div className="space-y-2">
                 <label className="text-[8px] font-black text-gray-500 uppercase ml-1">Nome de Exibição</label>
-                <input 
-                  maxLength={20} 
-                  type="text" 
-                  disabled={!canChangeDisplayName}
-                  value={editForm.displayName} 
-                  onChange={e => setEditForm({...editForm, displayName: e.target.value.replace(/[^a-zA-Z0-9]/g, '')})} 
-                  className={`w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm outline-none ${!canChangeDisplayName ? 'opacity-30' : 'focus:border-white'}`} 
-                />
+                <input maxLength={20} type="text" disabled={!canChangeDisplayName} value={editForm.displayName} onChange={e => setEditForm({...editForm, displayName: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm outline-none" />
               </div>
 
               <div className="space-y-2">
                 <label className="text-[8px] font-black text-gray-500 uppercase ml-1">Bio</label>
-                <textarea 
-                  maxLength={200} 
-                  value={editForm.bio} 
-                  onChange={e => setEditForm({...editForm, bio: e.target.value})} 
-                  className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm outline-none h-32 resize-none focus:border-white" 
-                />
+                <textarea maxLength={200} value={editForm.bio} onChange={e => setEditForm({...editForm, bio: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm outline-none h-32 resize-none" />
               </div>
             </div>
             <div className="mt-10 space-y-3">
-              <button onClick={handleSaveProfile} disabled={isSaving} className="w-full bg-white text-black py-4 rounded-2xl font-black text-[10px] uppercase shadow-xl disabled:opacity-50">
-                {isSaving ? 'SALVANDO...' : 'SALVAR'}
-              </button>
+              <button onClick={handleSaveProfile} disabled={isSaving} className="w-full bg-white text-black py-4 rounded-2xl font-black text-[10px] uppercase">SALVAR</button>
               <button onClick={onLogout} className="w-full border border-rose-500/20 text-rose-500 py-4 rounded-2xl font-black text-[10px] uppercase">SAIR DA CONTA</button>
             </div>
           </div>
         </div>
       )}
 
-      <UserListDrawer 
-        isOpen={listDrawer.isOpen}
-        onClose={() => setListDrawer({ ...listDrawer, isOpen: false })}
-        title={listDrawer.type === 'followers' ? 'Seguidores' : 'Seguindo'}
-        users={listDrawer.type === 'followers' ? followersList : followingList}
-        onUserClick={onNavigateToProfile}
-        emptyMessage={listDrawer.type === 'followers' ? "Ninguém te seguindo ainda." : "Não está seguindo ninguém."}
-      />
-
       {selectedVideo && (
         <div className="fixed inset-0 z-[600] bg-black">
-          <button onClick={() => setSelectedVideo(null)} className="absolute top-10 left-6 z-[610] bg-white text-black px-5 py-2 rounded-full text-[10px] font-black uppercase shadow-xl">Fechar</button>
+          <button onClick={() => setSelectedVideo(null)} className="absolute top-10 left-6 z-[610] bg-white text-black px-5 py-2 rounded-full text-[10px] font-black uppercase">Fechar</button>
           <VideoPlayer video={selectedVideo} isActive={true} onLike={onLike} onFollow={onFollow} onRepost={onRepost} onNavigateToProfile={onNavigateToProfile} currentUser={currentUser} onAddComment={onAddComment} onDeleteComment={onDeleteComment} onToggleComments={() => {}} onDeleteVideo={onDeleteVideo} isFollowing={!!followingMap[selectedVideo.username]} onLikeComment={onLikeComment} isMuted={isMuted} setIsMuted={setIsMuted} isRepostedByMe={currentUser.repostedVideoIds.includes(selectedVideo.id)} allAccounts={allAccountsData.map(a => a.profile)} />
         </div>
       )}
+
+      <UserListDrawer 
+        isOpen={listDrawer.isOpen} 
+        onClose={() => setListDrawer({ ...listDrawer, isOpen: false })} 
+        title={listDrawer.type === 'followers' ? 'Seguidores' : 'Seguindo'} 
+        users={listDrawer.type === 'followers' ? followersList : followingList} 
+        onUserClick={onNavigateToProfile} 
+      />
     </div>
   );
 };

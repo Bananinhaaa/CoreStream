@@ -53,6 +53,7 @@ export interface UserProfile {
   likes: number;
   isVerified?: boolean;
   isAdmin?: boolean;
+  isSupport?: boolean;
   isBanned?: boolean;
   banReason?: string;
   profileColor?: string;
