@@ -1,0 +1,8 @@
+{
+  "name": "Copy of CoreStream",
+  "description": "Rede social de vídeos de Scripter",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}

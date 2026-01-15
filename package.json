@@ -1,0 +1,11 @@
+
+{
+  "name": "corestream",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CoreStream Social Network",
+  "scripts": {
+    "start": "serve .",
+    "build": "echo 'No build step needed for direct ESM'"
+  }
+}
