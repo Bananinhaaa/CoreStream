@@ -1,23 +1,25 @@
 
-const CACHE_NAME = 'corestream-v3';
+const CACHE_NAME = 'corestream-v4';
 const STATIC_ASSETS = [
-  'index.html',
-  'manifest.json',
+  '/',
+  '/index.html',
+  '/manifest.json',
+  '/favicon.svg',
   'https://cdn.tailwindcss.com'
 ];
 
+// Instalação: Cacheia o App Shell (essencial para PWA)
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      // Adiciona recursos individualmente para que a falha de um não interrompa o registro
-      return Promise.allSettled(
-        STATIC_ASSETS.map(asset => cache.add(asset))
-      );
+      console.log('CoreStream: Cacheando App Shell');
+      return cache.addAll(STATIC_ASSETS);
     })
   );
   self.skipWaiting();
 });
 
+// Ativação: Limpa caches antigos
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
@@ -29,21 +31,33 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// Interceptação de requisições
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // CRÍTICO: Ignorar interceptação para APIs externas e arquivos de mídia pesados
-  // Isso garante que chamadas ao Gemini e Google Services nunca fiquem presas em cache
+  // Ignora chamadas de API externas e vídeos pesados para evitar erros de cache
   if (
     url.hostname.includes('googleapis') || 
     url.hostname.includes('google') || 
     url.hostname.includes('gstatic') ||
-    url.pathname.endsWith('.mp4')
+    url.pathname.endsWith('.mp4') ||
+    url.pathname.includes('/api/')
   ) {
-    return; // Deixa o navegador processar a requisição de rede padrão
+    return;
   }
 
-  // Estratégia Stale-While-Revalidate para arquivos da Interface do Usuário
+  // ESTRATÉGIA CRÍTICA PARA PWA NO IOS: 
+  // Se for uma navegação (abrir o app ou dar refresh), serve o index.html do cache.
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      caches.match('/index.html').then((response) => {
+        return response || fetch(event.request);
+      })
+    );
+    return;
+  }
+
+  // Para outros arquivos (scripts, estilos, imagens), usa Stale-While-Revalidate
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       const fetchPromise = fetch(event.request).then((networkResponse) => {
@@ -54,7 +68,7 @@ self.addEventListener('fetch', (event) => {
           });
         }
         return networkResponse;
-      }).catch(() => cachedResponse); // Fallback silencioso para o cache em caso de erro de rede
+      }).catch(() => cachedResponse);
 
       return cachedResponse || fetchPromise;
     })
