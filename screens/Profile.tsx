@@ -1,5 +1,5 @@
 
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { Video, UserProfile } from '../types';
 import { VerifiedBadge, TrashIcon } from '../components/Icons';
 import VideoPlayer from '../components/VideoPlayer';
@@ -32,8 +32,8 @@ interface ProfileProps {
   onInstallApp?: () => void;
 }
 
-const USERNAME_COOLDOWN = 30 * 24 * 60 * 60 * 1000; // 30 dias
-const DISPLAYNAME_COOLDOWN = 7 * 24 * 60 * 60 * 1000; // 7 dias
+const USERNAME_COOLDOWN = 30 * 24 * 60 * 60 * 1000;
+const DISPLAYNAME_COOLDOWN = 7 * 24 * 60 * 60 * 1000;
 
 const Profile: React.FC<ProfileProps> = ({ 
   videos, user, onUpdateProfile, onLogout, isOwnProfile, currentUser, 
@@ -44,6 +44,13 @@ const Profile: React.FC<ProfileProps> = ({
   installPrompt, onInstallApp
 }) => {
   if (!user) return null;
+
+  // Sistema de alerta de banimento
+  useEffect(() => {
+    if (user.isBanned && !isOwnProfile) {
+      alert("Esta conta foi banida por violar os termos da comunidade.");
+    }
+  }, [user, isOwnProfile]);
 
   const [activeTab, setActiveTab] = useState<'videos' | 'reposts'>('videos');
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
@@ -95,11 +102,7 @@ const Profile: React.FC<ProfileProps> = ({
     }
 
     if (!validate(editForm.username)) {
-      setError('Username: 3-20 letras ou números, sem espaços ou símbolos.');
-      return;
-    }
-    if (!validate(editForm.displayName)) {
-      setError('Nome: 3-20 letras ou números, sem espaços ou símbolos.');
+      setError('Username: 3-20 letras ou números.');
       return;
     }
 
@@ -130,7 +133,16 @@ const Profile: React.FC<ProfileProps> = ({
   };
 
   return (
-    <div className="h-full overflow-y-auto no-scrollbar pb-24 text-white" style={backgroundStyle}>
+    <div className={`h-full overflow-y-auto no-scrollbar pb-24 text-white ${user.isBanned && !isOwnProfile ? 'opacity-30 pointer-events-none' : ''}`} style={backgroundStyle}>
+      {user.isBanned && !isOwnProfile && (
+         <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-10 text-center">
+            <div className="bg-zinc-900 p-8 rounded-[3rem] border border-rose-500/30">
+               <h3 className="text-rose-500 font-black italic uppercase tracking-widest text-xl mb-2">Conta Suspensa</h3>
+               <p className="text-[10px] uppercase font-bold text-gray-500">Este perfil não está mais disponível.</p>
+            </div>
+         </div>
+      )}
+
       <div className="h-32 bg-gradient-to-b from-black/40 to-transparent w-full" />
       <div className="px-6 flex flex-col items-center">
         <div className="absolute top-10 right-6 flex gap-2">
@@ -174,7 +186,7 @@ const Profile: React.FC<ProfileProps> = ({
           )}
 
           {isOwnProfile && installPrompt && (
-            <button onClick={onInstallApp} className="w-full bg-indigo-600 text-white py-4 rounded-2xl text-[9px] font-black uppercase tracking-[0.2em] shadow-xl animate-bounce">
+            <button onClick={onInstallApp} className="w-full bg-indigo-600 text-white py-4 rounded-2xl text-[9px] font-black uppercase tracking-[0.2em] shadow-xl">
               Instalar Aplicativo 📱
             </button>
           )}
@@ -211,53 +223,56 @@ const Profile: React.FC<ProfileProps> = ({
                  <input type="file" ref={photoInputRef} className="hidden" accept="image/*" onChange={handlePhotoChange} />
               </div>
 
-              <div className="space-y-2">
-                <div className="flex justify-between items-center ml-1">
-                  <label className="text-[8px] font-black text-gray-500 uppercase">Username</label>
-                  {!canChangeUsername && <span className="text-[7px] text-rose-500 font-black uppercase">Troca em {usernameDays}d</span>}
+              {/* SOMENTE ADMINS PODEM MUDAR A COR */}
+              {user.isAdmin && (
+                <div className="space-y-2">
+                  <label className="text-[8px] font-black text-gray-500 uppercase ml-1">Cor do Perfil (Admin Only)</label>
+                  <input 
+                    type="color" 
+                    value={editForm.profileColor || '#000000'} 
+                    onChange={e => setEditForm({...editForm, profileColor: e.target.value})} 
+                    className="w-full h-12 bg-white/5 border border-white/10 rounded-xl cursor-pointer" 
+                  />
                 </div>
+              )}
+
+              <div className="space-y-2">
+                <label className="text-[8px] font-black text-gray-500 uppercase ml-1">Username</label>
                 <input 
                   maxLength={20} 
                   type="text" 
                   disabled={!canChangeUsername}
                   value={editForm.username} 
                   onChange={e => setEditForm({...editForm, username: e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '')})} 
-                  className={`w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm outline-none transition-all ${!canChangeUsername ? 'opacity-30 grayscale cursor-not-allowed' : 'focus:border-white'}`} 
+                  className={`w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm outline-none ${!canChangeUsername ? 'opacity-30' : 'focus:border-white'}`} 
                 />
               </div>
 
               <div className="space-y-2">
-                <div className="flex justify-between items-center ml-1">
-                  <label className="text-[8px] font-black text-gray-500 uppercase">Nome de Exibição</label>
-                  {!canChangeDisplayName && <span className="text-[7px] text-rose-500 font-black uppercase">Troca em {displayDays}d</span>}
-                </div>
+                <label className="text-[8px] font-black text-gray-500 uppercase ml-1">Nome de Exibição</label>
                 <input 
                   maxLength={20} 
                   type="text" 
                   disabled={!canChangeDisplayName}
                   value={editForm.displayName} 
                   onChange={e => setEditForm({...editForm, displayName: e.target.value.replace(/[^a-zA-Z0-9]/g, '')})} 
-                  className={`w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm outline-none transition-all ${!canChangeDisplayName ? 'opacity-30 grayscale cursor-not-allowed' : 'focus:border-white'}`} 
+                  className={`w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm outline-none ${!canChangeDisplayName ? 'opacity-30' : 'focus:border-white'}`} 
                 />
               </div>
 
               <div className="space-y-2">
-                <div className="flex justify-between ml-1">
-                  <label className="text-[8px] font-black text-gray-500 uppercase">Biografia</label>
-                  <span className={`text-[8px] font-black ${(editForm.bio?.length || 0) > 190 ? 'text-rose-500' : 'text-gray-500'}`}>{editForm.bio?.length || 0}/200</span>
-                </div>
+                <label className="text-[8px] font-black text-gray-500 uppercase ml-1">Biografia</label>
                 <textarea 
                   maxLength={200} 
                   value={editForm.bio} 
                   onChange={e => setEditForm({...editForm, bio: e.target.value})} 
                   className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm outline-none h-32 resize-none focus:border-white" 
-                  placeholder="Conte sua história..."
                 />
               </div>
             </div>
             <div className="mt-10 space-y-3">
-              <button onClick={handleSaveProfile} className="w-full bg-white text-black py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest">Salvar</button>
-              <button onClick={onLogout} className="w-full border border-rose-500/20 text-rose-500 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest">Sair da Conta</button>
+              <button onClick={handleSaveProfile} className="w-full bg-white text-black py-4 rounded-2xl font-black text-[10px] uppercase shadow-xl">Salvar</button>
+              <button onClick={onLogout} className="w-full border border-rose-500/20 text-rose-500 py-4 rounded-2xl font-black text-[10px] uppercase">Sair da Conta</button>
             </div>
           </div>
         </div>
@@ -274,8 +289,8 @@ const Profile: React.FC<ProfileProps> = ({
 
       {selectedVideo && (
         <div className="fixed inset-0 z-[600] bg-black">
-          <button onClick={() => setSelectedVideo(null)} className="absolute top-10 left-6 z-[610] bg-white text-black px-5 py-2 rounded-full text-[10px] font-black uppercase">Voltar</button>
-          <VideoPlayer video={selectedVideo} isActive={true} onLike={onLike} onFollow={onFollow} onRepost={onRepost} onNavigateToProfile={onNavigateToProfile} currentUser={currentUser} onAddComment={onAddComment} onDeleteComment={onDeleteComment} onToggleComments={() => {}} onDeleteVideo={onDeleteVideo} isFollowing={!!followingMap[selectedVideo.username]} onLikeComment={onLikeComment} isMuted={isMuted} setIsMuted={setIsMuted} isRepostedByMe={currentUser.repostedVideoIds.includes(selectedVideo.id)} />
+          <button onClick={() => setSelectedVideo(null)} className="absolute top-10 left-6 z-[610] bg-white text-black px-5 py-2 rounded-full text-[10px] font-black uppercase shadow-xl">Voltar</button>
+          <VideoPlayer video={selectedVideo} isActive={true} onLike={onLike} onFollow={onFollow} onRepost={onRepost} onNavigateToProfile={onNavigateToProfile} currentUser={currentUser} onAddComment={onAddComment} onDeleteComment={onDeleteComment} onToggleComments={() => {}} onDeleteVideo={onDeleteVideo} isFollowing={!!followingMap[selectedVideo.username]} onLikeComment={onLikeComment} isMuted={isMuted} setIsMuted={setIsMuted} isRepostedByMe={currentUser.repostedVideoIds.includes(selectedVideo.id)} allAccounts={allAccountsData.map(a => a.profile)} />
         </div>
       )}
     </div>
