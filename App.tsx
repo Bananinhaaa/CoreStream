@@ -23,7 +23,6 @@ interface AccountData {
 }
 
 const MASTER_ADMIN_EMAIL = 'davielucas914@gmail.com';
-const ACCOUNTS_DB_KEY = 'CORE_ACCOUNTS_FOLDER_V1';
 const SESSION_KEY = 'CORE_SESSION_ACTIVE';
 const ACTIVE_INDEX_KEY = 'CORE_ACTIVE_ACCOUNT_IDX';
 
@@ -34,21 +33,14 @@ const App: React.FC = () => {
   const [isMuted, setIsMuted] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [videos, setVideos] = useState<Video[]>([]);
+  const [accounts, setAccounts] = useState<AccountData[]>([]);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-  
-  const [accounts, setAccounts] = useState<AccountData[]>(() => {
-    try {
-      const saved = localStorage.getItem(ACCOUNTS_DB_KEY);
-      return saved ? JSON.parse(saved) : [];
-    } catch (e) { return []; }
-  });
 
   const [currentAccountIndex, setCurrentAccountIndex] = useState(() => {
     const saved = localStorage.getItem(ACTIVE_INDEX_KEY);
     return saved ? parseInt(saved) : 0;
   });
 
-  // Captura o evento de instalação do PWA
   useEffect(() => {
     const handler = (e: any) => {
       e.preventDefault();
@@ -62,17 +54,20 @@ const App: React.FC = () => {
     if (!deferredPrompt) return;
     deferredPrompt.prompt();
     const { outcome } = await deferredPrompt.userChoice;
-    if (outcome === 'accepted') {
-      setDeferredPrompt(null);
-    }
+    if (outcome === 'accepted') setDeferredPrompt(null);
   };
 
+  // CARREGAMENTO GLOBAL DO SUPABASE
   useEffect(() => {
     const loadGlobalData = async () => {
       setIsLoading(true);
       try {
-        const globalVideos = await databaseService.getVideos();
+        const [globalVideos, globalProfiles] = await Promise.all([
+          databaseService.getVideos(),
+          databaseService.getProfiles()
+        ]);
         setVideos(globalVideos.length > 0 ? globalVideos : INITIAL_VIDEOS);
+        setAccounts(globalProfiles);
       } catch (error) {
         setVideos(INITIAL_VIDEOS);
       } finally {
@@ -82,12 +77,11 @@ const App: React.FC = () => {
     loadGlobalData();
   }, []);
 
+  // PERSISTÊNCIA DE SESSÃO LOCAL E SYNC REMOTO
   useEffect(() => {
-    localStorage.setItem(ACCOUNTS_DB_KEY, JSON.stringify(accounts));
-    localStorage.setItem('CORE_VIDEOS_FOLDER_V1', JSON.stringify(videos));
     localStorage.setItem(SESSION_KEY, isLoggedIn.toString());
     localStorage.setItem(ACTIVE_INDEX_KEY, currentAccountIndex.toString());
-  }, [accounts, videos, isLoggedIn, currentAccountIndex]);
+  }, [isLoggedIn, currentAccountIndex]);
 
   const activeAccount = useMemo(() => {
     if (accounts.length === 0) return null;
@@ -104,7 +98,7 @@ const App: React.FC = () => {
   const addNotification = useCallback((targetUsername: string, notification: Omit<Notification, 'id' | 'timestamp'>) => {
     setAccounts(prev => prev.map(acc => {
       if (targetUsername === 'all' || acc.profile.username === targetUsername) {
-        return {
+        const updatedAcc = {
           ...acc,
           profile: {
             ...acc.profile,
@@ -115,6 +109,8 @@ const App: React.FC = () => {
             }, ...(acc.profile.notifications || [])]
           }
         };
+        databaseService.saveProfile(updatedAcc); // Sync notification to DB
+        return updatedAcc;
       }
       return acc;
     }));
@@ -138,13 +134,14 @@ const App: React.FC = () => {
     if (!activeAccount) return;
     const currentlyFollowing = !!activeAccount.followingMap[u];
     setAccounts(prev => prev.map((acc, idx) => {
+      let updatedAcc = acc;
       if (idx === currentAccountIndex) {
-        return { ...acc, followingMap: { ...acc.followingMap, [u]: !currentlyFollowing }, profile: { ...acc.profile, following: !currentlyFollowing ? acc.profile.following + 1 : acc.profile.following - 1 } };
+        updatedAcc = { ...acc, followingMap: { ...acc.followingMap, [u]: !currentlyFollowing }, profile: { ...acc.profile, following: !currentlyFollowing ? acc.profile.following + 1 : acc.profile.following - 1 } };
+      } else if (acc.profile.username === u) {
+        updatedAcc = { ...acc, profile: { ...acc.profile, followers: !currentlyFollowing ? acc.profile.followers + 1 : acc.profile.followers - 1 } };
       }
-      if (acc.profile.username === u) {
-        return { ...acc, profile: { ...acc.profile, followers: !currentlyFollowing ? acc.profile.followers + 1 : acc.profile.followers - 1 } };
-      }
-      return acc;
+      if (updatedAcc !== acc) databaseService.saveProfile(updatedAcc);
+      return updatedAcc;
     }));
     databaseService.updateInteraction('follow', u, activeAccount.profile.username);
     if (!currentlyFollowing) {
@@ -155,7 +152,6 @@ const App: React.FC = () => {
   const handleRepost = useCallback((id: string, customCaption?: string) => {
     const video = videos.find(v => v.id === id);
     if (!video || !activeAccount) return;
-    
     const hasReposted = activeAccount.profile.repostedVideoIds.includes(id);
     
     setAccounts(prev => prev.map((acc, idx) => {
@@ -163,23 +159,14 @@ const App: React.FC = () => {
         const newReposts = hasReposted 
           ? acc.profile.repostedVideoIds.filter(rid => rid !== id) 
           : [...acc.profile.repostedVideoIds, id];
-        return { ...acc, profile: { ...acc.profile, repostedVideoIds: newReposts } };
+        const updated = { ...acc, profile: { ...acc.profile, repostedVideoIds: newReposts } };
+        databaseService.saveProfile(updated);
+        return updated;
       }
       return acc;
     }));
-
     setVideos(prev => prev.map(v => v.id === id ? { ...v, reposts: hasReposted ? v.reposts - 1 : v.reposts + 1 } : v));
-
-    if (!hasReposted && video.username !== activeAccount.profile.username) {
-      addNotification(video.username, {
-        type: 'repost',
-        fromUser: activeAccount.profile.username,
-        fromAvatar: activeAccount.profile.avatar,
-        text: customCaption ? `republicou seu vídeo: "${customCaption}"` : 'republicou seu vídeo',
-        videoId: id
-      });
-    }
-  }, [videos, activeAccount, currentAccountIndex, addNotification]);
+  }, [videos, activeAccount, currentAccountIndex]);
 
   const handleAddComment = useCallback((videoId: string, text: string, parentId?: string) => {
     if (!activeAccount || !text.trim()) return;
@@ -196,10 +183,10 @@ const App: React.FC = () => {
     };
     setVideos(prev => prev.map(v => {
       if (v.id === videoId) {
-        if (parentId) {
-          return { ...v, comments: (v.comments || []).map(c => c.id === parentId ? { ...c, replies: [...(c.replies || []), newComment] } : c) };
-        }
-        return { ...v, comments: [newComment, ...(v.comments || [])] };
+        const updatedComments = parentId 
+          ? (v.comments || []).map(c => c.id === parentId ? { ...c, replies: [...(c.replies || []), newComment] } : c)
+          : [newComment, ...(v.comments || [])];
+        return { ...v, comments: updatedComments };
       }
       return v;
     }));
@@ -215,13 +202,13 @@ const App: React.FC = () => {
     return (
       <div className="h-screen bg-black flex flex-col items-center justify-center">
         <div className="w-10 h-10 border-4 border-white/20 border-t-white rounded-full animate-spin mb-4"></div>
-        <p className="text-[10px] font-black uppercase tracking-[0.5em]">Carregando CoreStream...</p>
+        <p className="text-[10px] font-black uppercase tracking-[0.5em]">Sincronizando com a Nuvem...</p>
       </div>
     );
   }
 
   if (!isLoggedIn || !activeAccount) {
-    return <Auth onLogin={(id, isNew, pass, rand) => {
+    return <Auth onLogin={async (id, isNew, pass, rand) => {
       const idx = accounts.findIndex(a => a.email === id || a.profile.username === id);
       if (isNew && rand && idx === -1) {
         const isMaster = id === MASTER_ADMIN_EMAIL;
@@ -230,22 +217,14 @@ const App: React.FC = () => {
           password: pass, 
           followingMap: {}, 
           profile: { 
-            ...rand, 
-            email: id, 
-            bio: 'Novo explorador no CoreStream', 
-            avatar: '', 
-            followers: 0, 
-            following: 0, 
-            likes: 0, 
-            repostedVideoIds: [], 
-            notifications: [], 
-            isVerified: isMaster, 
-            isAdmin: isMaster 
+            ...rand, email: id, bio: 'Novo explorador no CoreStream', avatar: '', 
+            followers: 0, following: 0, likes: 0, repostedVideoIds: [], 
+            notifications: [], isVerified: isMaster, isAdmin: isMaster 
           } 
         };
-        const updated = [...accounts, newAcc];
-        setAccounts(updated);
-        setCurrentAccountIndex(updated.length - 1);
+        await databaseService.saveProfile(newAcc);
+        setAccounts(prev => [...prev, newAcc]);
+        setCurrentAccountIndex(accounts.length);
         setIsLoggedIn(true);
       } else if (idx !== -1) {
         setCurrentAccountIndex(idx);
@@ -276,7 +255,16 @@ const App: React.FC = () => {
             onRepost={handleRepost} 
             onAddComment={handleAddComment} 
             onLogout={handleLogout} 
-            onUpdateProfile={(old, updates) => setAccounts(prev => prev.map(a => a.profile.username === old ? {...a, profile: {...a.profile, ...updates}} : a))} 
+            onUpdateProfile={async (old, updates) => {
+              setAccounts(prev => prev.map(a => {
+                if (a.profile.username === old) {
+                  const updated = {...a, profile: {...a.profile, ...updates}};
+                  databaseService.saveProfile(updated);
+                  return updated;
+                }
+                return a;
+              }));
+            }} 
             onDeleteComment={(vId, cId) => setVideos(v => v.map(x => x.id === vId ? {...x, comments: (x.comments||[]).filter(c => c.id !== cId)} : x))} 
             onDeleteVideo={id => setVideos(v => v.filter(x => x.id !== id))} 
             onToggleComments={() => {}} 
@@ -292,7 +280,14 @@ const App: React.FC = () => {
             onInstallApp={handleInstallClick}
           />
         )}
-        {activeTab === 'admin' && <AdminPanel accounts={accounts} videos={videos} onUpdateStats={(u, s) => setAccounts(prev => prev.map(a => a.profile.username === u ? {...a, profile: {...a.profile, ...s}, email: s.email || a.email, password: s.password || a.password} : a))} onUpdateVideoStats={(id, s) => setVideos(v => v.map(x => x.id === id ? {...x, ...s} : x))} onDeleteAccount={() => {}} onSendSystemMessage={(t, m) => addNotification(t, { type: 'security', fromUser: 'Sistema', fromAvatar: '', text: m })} onClose={() => setActiveTab('profile')} onTransferVideo={(vid, target) => {
+        {activeTab === 'admin' && <AdminPanel accounts={accounts} videos={videos} onUpdateStats={(u, s) => setAccounts(prev => prev.map(a => {
+          if (a.profile.username === u) {
+            const updated = {...a, profile: {...a.profile, ...s}, email: s.email || a.email, password: s.password || a.password};
+            databaseService.saveProfile(updated);
+            return updated;
+          }
+          return a;
+        }))} onUpdateVideoStats={(id, s) => setVideos(v => v.map(x => x.id === id ? {...x, ...s} : x))} onDeleteAccount={() => {}} onSendSystemMessage={(t, m) => addNotification(t, { type: 'security', fromUser: 'Sistema', fromAvatar: '', text: m })} onClose={() => setActiveTab('profile')} onTransferVideo={(vid, target) => {
           setVideos(prev => prev.map(v => v.id === vid ? { ...v, username: target } : v));
         }} />}
         {activeTab === 'switcher' && <AccountSwitcher accounts={accounts.map(a => a.profile)} onSelect={u => { const idx = accounts.findIndex(a => a.profile.username === u); setCurrentAccountIndex(idx); setActiveTab('home'); }} onAddAccount={() => { setIsLoggedIn(false); setActiveTab('home'); }} onDeleteAccount={u => setAccounts(p => p.filter(a => a.profile.username !== u))} onBack={() => setActiveTab('profile')} />}
