@@ -56,6 +56,22 @@ export const databaseService = {
     }
   },
 
+  async deleteVideo(id: string): Promise<void> {
+    const current = JSON.parse(localStorage.getItem('CORE_VIDEOS') || '[]');
+    const updated = current.filter((v: any) => v.id !== id);
+    localStorage.setItem('CORE_VIDEOS', JSON.stringify(updated));
+
+    if (isConfigured) {
+      try {
+        await fetch(`${convexUrl}/deleteVideo`, {
+          method: 'POST',
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id })
+        });
+      } catch (e) { console.error("Cloud Error (Delete Video):", e); }
+    }
+  },
+
   async getProfiles(): Promise<any[] | null> {
     const local = JSON.parse(localStorage.getItem(PROFILES_STORAGE_KEY) || '[]');
     if (!isConfigured) return local;
@@ -67,23 +83,19 @@ export const databaseService = {
   },
 
   async saveProfile(account: any): Promise<void> {
-    // 1. Persistência Local Imediata
     const current = JSON.parse(localStorage.getItem(PROFILES_STORAGE_KEY) || '[]');
     const username = account.profile?.username || account.username;
     const updated = [account, ...current.filter((a: any) => (a.profile?.username || a.username) !== username)];
     localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(updated));
 
-    // 2. Persistência Cloud
     if (isConfigured) {
       try {
-        // Formato esperado pelo convex/profiles.ts
         const payload = {
           profile: account.profile,
           email: account.email || account.profile.email,
           password: account.password || '',
           followingMap: account.followingMap || {}
         };
-        
         await fetch(`${convexUrl}/saveProfile`, {
           method: 'POST',
           headers: { "Content-Type": "application/json" },
@@ -94,19 +106,15 @@ export const databaseService = {
   },
 
   async uploadFile(bucket: 'videos' | 'avatars', file: File | Blob, path: string): Promise<string | null> {
-    // Se for avatar e estiver offline, usamos Base64 para persistir no LocalStorage
     if (bucket === 'avatars' && !isConfigured) {
       return await fileToBase64(file);
     }
-
     if (!isConfigured) return URL.createObjectURL(file);
-
     try {
       const response = await fetch(`${convexUrl}/api/mutation/media/generateUploadUrl`, { method: "POST" });
       const { value: uploadUrl } = await response.json();
       const result = await fetch(uploadUrl, { method: "POST", body: file });
       const { storageId } = await result.json();
-      
       const getUrlResponse = await fetch(`${convexUrl}/api/query/media/getPublicUrl`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

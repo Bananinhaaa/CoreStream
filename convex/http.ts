@@ -4,7 +4,6 @@ import { httpAction } from "./server";
 
 const http = httpRouter();
 
-// Endpoint para listar vídeos
 http.route({
   path: "/listVideos",
   method: "POST",
@@ -17,7 +16,6 @@ http.route({
   }),
 });
 
-// Endpoint para listar perfis
 http.route({
   path: "/listProfiles",
   method: "POST",
@@ -30,7 +28,6 @@ http.route({
   }),
 });
 
-// Endpoint para salvar vídeos
 http.route({
   path: "/saveVideo",
   method: "POST",
@@ -41,7 +38,16 @@ http.route({
   }),
 });
 
-// Endpoint para salvar perfis
+http.route({
+  path: "/deleteVideo",
+  method: "POST",
+  handler: httpAction(async (ctx: any, request: Request) => {
+    const args = await request.json();
+    await ctx.runMutation("videos:remove", args);
+    return new Response(null, { status: 200 });
+  }),
+});
+
 http.route({
   path: "/saveProfile",
   method: "POST",
@@ -52,7 +58,6 @@ http.route({
   }),
 });
 
-// Endpoint para atualizar presença
 http.route({
   path: "/updatePresence",
   method: "POST",

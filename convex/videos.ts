@@ -26,7 +26,6 @@ export const save = mutation({
     storageId: v.optional(v.string()),
   },
   handler: async (ctx: any, args: any) => {
-    // Busca pelo ID customizado usando o novo nome de índice 'by_videoId'
     const existing = await ctx.db
       .query("videos")
       .withIndex("by_videoId", (q: any) => q.eq("id", args.id))
@@ -36,6 +35,19 @@ export const save = mutation({
       await ctx.db.patch(existing._id, args);
     } else {
       await ctx.db.insert("videos", args);
+    }
+  },
+});
+
+export const remove = mutation({
+  args: { id: v.string() },
+  handler: async (ctx: any, args: any) => {
+    const existing = await ctx.db
+      .query("videos")
+      .withIndex("by_videoId", (q: any) => q.eq("id", args.id))
+      .first();
+    if (existing) {
+      await ctx.db.delete(existing._id);
     }
   },
 });

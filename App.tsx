@@ -74,7 +74,7 @@ const App: React.FC = () => {
         profileColor: profileData.profileColor || '#000000',
         repostedVideoIds: Array.isArray(profileData.repostedVideoIds) ? profileData.repostedVideoIds : [],
         notifications: Array.isArray(profileData.notifications) ? profileData.notifications : [],
-        lastSeen: profileData.lastSeen || Date.now()
+        lastSeen: Number(profileData.lastSeen || Date.now())
       },
       followingMap: p.followingMap || {},
       email: p.email || profileData.email || '',
@@ -99,15 +99,12 @@ const App: React.FC = () => {
             const acc = normalizeAccount(p);
             if (acc) remoteMap.set(acc.profile.username, acc);
           });
-
-          // Unir dados remotos com locais para não perder a conta ativa
           const merged = Array.from(remoteMap.values());
           prev.forEach(localAcc => {
             if (!remoteMap.has(localAcc.profile.username) && localAcc.profile.username === currentUsername) {
               merged.push(localAcc);
             }
           });
-
           localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(merged));
           return merged;
         });
@@ -127,9 +124,18 @@ const App: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 10000);
+    const interval = setInterval(loadData, 8000);
     return () => clearInterval(interval);
   }, [loadData]);
+
+  useEffect(() => {
+    if (currentUsername && isLoggedIn) {
+      const pInterval = setInterval(() => {
+        databaseService.updatePresence(currentUsername);
+      }, 30000);
+      return () => clearInterval(pInterval);
+    }
+  }, [currentUsername, isLoggedIn]);
 
   const activeAccount = useMemo(() => {
     if (!currentUsername) return null;
@@ -146,24 +152,17 @@ const App: React.FC = () => {
 
   const handleAuth = useCallback(async (identifier: string, isNew: boolean, password?: string, randomData?: { displayName: string, username: string }) => {
     const idClean = identifier.toLowerCase().trim();
-    
     if (isNew && randomData) {
       const isMaster = idClean === MASTER_ADMIN_EMAIL.toLowerCase();
       const newAcc: AccountData = {
-        email: idClean,
-        password: password || '',
-        followingMap: {},
+        email: idClean, password: password || '', followingMap: {},
         profile: {
-          username: randomData.username,
-          displayName: randomData.displayName,
-          bio: '', avatar: '', email: idClean,
-          followers: 0, following: 0, likes: 0,
+          username: randomData.username, displayName: randomData.displayName,
+          bio: '', avatar: '', email: idClean, followers: 0, following: 0, likes: 0,
           isVerified: isMaster, isAdmin: isMaster, isBanned: false,
-          profileColor: '#000000', repostedVideoIds: [], notifications: [],
-          lastSeen: Date.now()
+          profileColor: '#000000', repostedVideoIds: [], notifications: [], lastSeen: Date.now()
         }
       };
-
       setAccounts(prev => [newAcc, ...prev]);
       await databaseService.saveProfile(newAcc);
       handleLoginSuccess(newAcc.profile.username);
@@ -181,35 +180,16 @@ const App: React.FC = () => {
     setActiveTab('home');
   }, []);
 
-  // Interações Online (Like, Follow, Comment)
   const handleFollow = useCallback(async (targetUsername: string) => {
     if (!activeAccount || activeAccount.profile.username === targetUsername) return;
     const isFollowing = !!activeAccount.followingMap[targetUsername];
     const newMap = { ...activeAccount.followingMap, [targetUsername]: !isFollowing };
-    
-    const updatedMe = { 
-      ...activeAccount, 
-      followingMap: newMap, 
-      profile: { ...activeAccount.profile, following: Math.max(0, activeAccount.profile.following + (isFollowing ? -1 : 1)) }
-    };
-
+    const updatedMe = { ...activeAccount, followingMap: newMap, profile: { ...activeAccount.profile, following: Math.max(0, activeAccount.profile.following + (isFollowing ? -1 : 1)) } };
     const targetAcc = accounts.find(a => a.profile.username === targetUsername);
     if (targetAcc) {
-      const updatedTarget = { 
-        ...targetAcc, 
-        profile: { ...targetAcc.profile, followers: Math.max(0, targetAcc.profile.followers + (isFollowing ? -1 : 1)) }
-      };
-
-      setAccounts(prev => prev.map(a => {
-        if (a.profile.username === updatedMe.profile.username) return updatedMe;
-        if (a.profile.username === updatedTarget.profile.username) return updatedTarget;
-        return a;
-      }));
-
-      await Promise.all([
-        databaseService.saveProfile(updatedMe),
-        databaseService.saveProfile(updatedTarget)
-      ]);
+      const updatedTarget = { ...targetAcc, profile: { ...targetAcc.profile, followers: Math.max(0, targetAcc.profile.followers + (isFollowing ? -1 : 1)) } };
+      setAccounts(prev => prev.map(a => a.profile.username === updatedMe.profile.username ? updatedMe : a.profile.username === updatedTarget.profile.username ? updatedTarget : a));
+      await Promise.all([databaseService.saveProfile(updatedMe), databaseService.saveProfile(updatedTarget)]);
     }
   }, [activeAccount, accounts]);
 
@@ -217,46 +197,58 @@ const App: React.FC = () => {
     if (!activeAccount) return;
     const video = videos.find(v => v.id === videoId);
     if (!video) return;
-
     const isLiked = !video.isLiked;
     const updatedVideo = { ...video, isLiked, likes: Math.max(0, (video.likes || 0) + (isLiked ? 1 : -1)) };
+    setVideos(prev => prev.map(v => v.id === videoId ? updatedVideo : v));
+    await databaseService.saveVideo(updatedVideo);
+  }, [activeAccount, videos]);
 
+  const handleDeleteVideo = useCallback(async (videoId: string) => {
+    if (!activeAccount) return;
+    if (confirm('Tem certeza que deseja apagar este vídeo?')) {
+      setVideos(prev => prev.filter(v => v.id !== videoId));
+      await databaseService.deleteVideo(videoId);
+    }
+  }, [activeAccount]);
+
+  const handleAddComment = useCallback(async (videoId: string, text: string) => {
+    if (!activeAccount) return;
+    const video = videos.find(v => v.id === videoId);
+    if (!video) return;
+    const newComment: Comment = {
+      id: Date.now().toString(), username: activeAccount.profile.username,
+      displayName: activeAccount.profile.displayName, avatar: activeAccount.profile.avatar,
+      text, timestamp: Date.now(), likes: 0
+    };
+    const updatedVideo = { ...video, comments: [...(video.comments || []), newComment] };
     setVideos(prev => prev.map(v => v.id === videoId ? updatedVideo : v));
     await databaseService.saveVideo(updatedVideo);
   }, [activeAccount, videos]);
 
   if (isLoading && accounts.length === 0) {
-    return (
-      <div className="h-screen bg-black flex flex-col items-center justify-center p-12 text-center">
-        <Logo size={100} className="mb-12 animate-pulse" />
-        <h2 className="text-xl font-black italic uppercase tracking-tighter">CORE CLOUD</h2>
-      </div>
-    );
+    return <div className="h-screen bg-black flex items-center justify-center p-12 text-center"><Logo size={100} className="animate-pulse" /></div>;
   }
 
   if (!isLoggedIn) {
     return <Auth onLogin={handleAuth} registeredAccounts={accounts.map(a => ({ email: a.email, username: a.profile.username, password: a.password }))} />;
   }
 
-  if (!activeAccount) {
-    if (!isLoading) handleLogout();
-    return null;
-  }
+  if (!activeAccount) { if (!isLoading) handleLogout(); return null; }
 
   const profileToRender = viewingUser ? accounts.find(a => a.profile.username === viewingUser)?.profile : activeAccount.profile;
 
   return (
     <div className="flex flex-col h-screen bg-black text-white overflow-hidden">
       <main className="flex-1 relative overflow-hidden">
-        {activeTab === 'home' && <Feed videos={videos} currentUser={activeAccount.profile} onLike={handleLikeVideo} onFollow={handleFollow} onRepost={()=>{}} onAddComment={()=>{}} onNavigateToProfile={u => { setViewingUser(u); setActiveTab('profile'); }} followingMap={activeAccount.followingMap} isMuted={isMuted} setIsMuted={setIsMuted} onSearchClick={() => setActiveTab('discover')} onDeleteComment={()=>{}} onDeleteVideo={()=>{}} onToggleComments={() => {}} onLikeComment={()=>{}} allAccounts={accounts.map(a => a.profile)} />}
+        {activeTab === 'home' && <Feed videos={videos} currentUser={activeAccount.profile} onLike={handleLikeVideo} onFollow={handleFollow} onRepost={()=>{}} onAddComment={handleAddComment} onNavigateToProfile={u => { setViewingUser(u); setActiveTab('profile'); }} followingMap={activeAccount.followingMap} isMuted={isMuted} setIsMuted={setIsMuted} onSearchClick={() => setActiveTab('discover')} onDeleteComment={()=>{}} onDeleteVideo={handleDeleteVideo} onToggleComments={() => {}} onLikeComment={()=>{}} allAccounts={accounts.map(a => a.profile)} />}
         {activeTab === 'discover' && <Discover videos={videos} onNavigateToProfile={u => { setViewingUser(u); setActiveTab('profile'); }} currentUser={activeAccount.profile} allAccounts={accounts} />}
         {activeTab === 'create' && <Create onAddVideo={(v) => { setVideos([v, ...videos]); databaseService.saveVideo(v); setActiveTab('home'); }} currentUser={activeAccount.profile} allAccounts={accounts} />}
         {activeTab === 'inbox' && <Inbox currentUser={activeAccount.profile} onNavigateToProfile={u => { setViewingUser(u); setActiveTab('profile'); }} videos={videos} />}
         {activeTab === 'profile' && profileToRender && (
           <Profile 
             user={profileToRender} videos={videos} isOwnProfile={!viewingUser || viewingUser === activeAccount.profile.username} currentUser={activeAccount.profile}
-            onFollow={handleFollow} onLike={handleLikeVideo} onRepost={()=>{}} onAddComment={()=>{}} onLogout={handleLogout}
-            onUpdateProfile={(old, up) => databaseService.saveProfile({...activeAccount, profile: {...activeAccount.profile, ...up}})} onDeleteComment={()=>{}} onDeleteVideo={()=>{}} onToggleComments={() => {}} followingMap={activeAccount.followingMap}
+            onFollow={handleFollow} onLike={handleLikeVideo} onRepost={()=>{}} onAddComment={handleAddComment} onLogout={handleLogout}
+            onUpdateProfile={(old, up) => databaseService.saveProfile({...activeAccount, profile: {...activeAccount.profile, ...up}})} onDeleteComment={()=>{}} onDeleteVideo={handleDeleteVideo} onToggleComments={() => {}} followingMap={activeAccount.followingMap}
             onNavigateToProfile={u => { setViewingUser(u); setActiveTab('profile'); }} onSwitchAccount={() => setActiveTab('switcher')} allAccountsData={accounts} 
             onOpenAdmin={() => setActiveTab('admin')} onOpenSupport={() => setActiveTab('support')}
             onLikeComment={()=>{}} isMuted={isMuted} setIsMuted={setIsMuted}
