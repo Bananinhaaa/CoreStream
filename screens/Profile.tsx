@@ -57,6 +57,7 @@ const Profile: React.FC<ProfileProps> = ({
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [editForm, setEditForm] = useState<UserProfile>(() => ({...user}));
   const [error, setError] = useState('');
   const [listDrawer, setListDrawer] = useState<{ type: 'followers' | 'following' | null; isOpen: boolean }>({ type: null, isOpen: false });
@@ -92,6 +93,8 @@ const Profile: React.FC<ProfileProps> = ({
   const validate = (val: string) => /^[a-zA-Z0-9]{3,20}$/.test(val);
 
   const handleSaveProfile = async () => {
+    if (isUploadingPhoto) return; // Trava de segurança
+    
     setError('');
     setIsSaving(true);
     
@@ -112,6 +115,13 @@ const Profile: React.FC<ProfileProps> = ({
       return;
     }
 
+    // Se o avatar ainda for um blob e o upload falhou ou não terminou, avisar
+    if (editForm.avatar?.startsWith('blob:')) {
+      setError('Aguarde o upload da foto terminar antes de salvar.');
+      setIsSaving(false);
+      return;
+    }
+
     const finalUpdates: any = { ...editForm };
     if (editForm.username !== user.username) finalUpdates.lastUsernameChange = Date.now();
     if (editForm.displayName !== user.displayName) finalUpdates.lastDisplayNameChange = Date.now();
@@ -124,13 +134,22 @@ const Profile: React.FC<ProfileProps> = ({
   const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setIsUploadingPhoto(true);
+      setError('');
+      
+      // Feedback imediato (temporário)
       const tempUrl = URL.createObjectURL(file);
       setEditForm(prev => ({ ...prev, avatar: tempUrl }));
+      
       const fileName = `avatar_${user.username}_${Date.now()}.jpg`;
       const uploadedUrl = await databaseService.uploadFile('avatars', file, fileName);
+      
       if (uploadedUrl) {
         setEditForm(prev => ({ ...prev, avatar: uploadedUrl }));
+      } else {
+        setError('Falha ao enviar foto para a nuvem.');
       }
+      setIsUploadingPhoto(false);
     }
   };
 
@@ -213,23 +232,33 @@ const Profile: React.FC<ProfileProps> = ({
           <div className="absolute inset-0 bg-black/95 backdrop-blur-xl" onClick={() => setIsEditing(false)} />
           <div className="relative w-full max-w-lg bg-[#0d0d0d] rounded-[2.5rem] p-8 border border-white/10 max-h-[85vh] overflow-y-auto no-scrollbar">
             <h3 className="text-xl font-black italic uppercase mb-8">Editar Identidade</h3>
+            
+            {error && <p className="bg-rose-500/10 text-rose-500 p-3 rounded-xl text-[10px] font-bold uppercase mb-4 text-center border border-rose-500/20">{error}</p>}
+
             <div className="space-y-6">
               <div className="flex flex-col items-center gap-4 mb-4">
-                 <div className="w-24 h-24 rounded-[2rem] bg-white/5 border border-white/10 overflow-hidden relative group cursor-pointer" onClick={() => photoInputRef.current?.click()}>
+                 <div className="w-24 h-24 rounded-[2rem] bg-white/5 border border-white/10 overflow-hidden relative group cursor-pointer" onClick={() => !isUploadingPhoto && photoInputRef.current?.click()}>
                     {editForm.avatar ? <img src={editForm.avatar} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center opacity-40">FOTO</div>}
-                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-[8px] font-black">TROCAR</div>
+                    
+                    <div className={`absolute inset-0 bg-black/60 flex items-center justify-center transition-opacity text-[8px] font-black ${isUploadingPhoto ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                      {isUploadingPhoto ? 'ENVIANDO...' : 'TROCAR'}
+                    </div>
+                    
+                    {isUploadingPhoto && (
+                      <div className="absolute bottom-0 left-0 h-1 bg-indigo-500 animate-pulse w-full"></div>
+                    )}
                  </div>
                  <input type="file" ref={photoInputRef} className="hidden" accept="image/*" onChange={handlePhotoChange} />
               </div>
 
               <div className="space-y-2">
                 <label className="text-[8px] font-black text-gray-500 uppercase ml-1">Username</label>
-                <input maxLength={20} type="text" disabled={!canChangeUsername} value={editForm.username} onChange={e => setEditForm({...editForm, username: e.target.value.toLowerCase()})} className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm outline-none" />
+                <input maxLength={20} type="text" disabled={!canChangeUsername} value={editForm.username} onChange={e => setEditForm({...editForm, username: e.target.value.toLowerCase()})} className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm outline-none disabled:opacity-30" />
               </div>
 
               <div className="space-y-2">
                 <label className="text-[8px] font-black text-gray-500 uppercase ml-1">Nome de Exibição</label>
-                <input maxLength={20} type="text" disabled={!canChangeDisplayName} value={editForm.displayName} onChange={e => setEditForm({...editForm, displayName: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm outline-none" />
+                <input maxLength={20} type="text" disabled={!canChangeDisplayName} value={editForm.displayName} onChange={e => setEditForm({...editForm, displayName: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm outline-none disabled:opacity-30" />
               </div>
 
               <div className="space-y-2">
@@ -238,7 +267,13 @@ const Profile: React.FC<ProfileProps> = ({
               </div>
             </div>
             <div className="mt-10 space-y-3">
-              <button onClick={handleSaveProfile} disabled={isSaving} className="w-full bg-white text-black py-4 rounded-2xl font-black text-[10px] uppercase">SALVAR</button>
+              <button 
+                onClick={handleSaveProfile} 
+                disabled={isSaving || isUploadingPhoto} 
+                className="w-full bg-white text-black py-4 rounded-2xl font-black text-[10px] uppercase disabled:opacity-30"
+              >
+                {isSaving ? 'SALVANDO...' : 'SALVAR'}
+              </button>
               <button onClick={onLogout} className="w-full border border-rose-500/20 text-rose-500 py-4 rounded-2xl font-black text-[10px] uppercase">SAIR DA CONTA</button>
             </div>
           </div>
