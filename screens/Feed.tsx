@@ -2,6 +2,7 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { Video, UserProfile } from '../types';
 import VideoPlayer from '../components/VideoPlayer';
+import { databaseService } from '../services/databaseService';
 
 interface FeedProps {
   videos: Video[];
@@ -35,6 +36,7 @@ const Feed: React.FC<FeedProps> = ({
   const [feedTab, setFeedTab] = useState<'foryou' | 'following'>('foryou');
   const containerRef = useRef<HTMLDivElement>(null);
   const viewedVideos = useRef<Set<string>>(new Set());
+  const isConnected = databaseService.isConnected();
 
   const displayVideos = useMemo(() => {
     if (feedTab === 'foryou') return videos;
@@ -72,7 +74,10 @@ const Feed: React.FC<FeedProps> = ({
   return (
     <div className="h-full w-full relative bg-black">
        <div className="absolute top-0 left-0 w-full z-40 flex justify-between items-center px-6 py-10 pointer-events-none">
-          <h1 className="text-xl font-black tracking-[0.2em] text-white pointer-events-auto italic">CORE</h1>
+          <div className="flex items-center gap-3 pointer-events-auto">
+            <h1 className="text-xl font-black tracking-[0.2em] text-white italic">CORE</h1>
+            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-amber-500'}`} title={isConnected ? 'Conectado à Nuvem' : 'Modo Offline'}></div>
+          </div>
           
           <div className="flex gap-4 pointer-events-auto bg-black/60 backdrop-blur-2xl px-6 py-3 rounded-full border border-white/10 shadow-2xl shadow-black">
             <button 

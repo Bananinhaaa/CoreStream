@@ -4,25 +4,36 @@ import { Video, UserProfile } from '../types';
 import { INITIAL_VIDEOS } from '../constants';
 
 const convexUrl = (import.meta as any).env?.VITE_CONVEX_URL || '';
-const isConfigured = !!convexUrl && convexUrl !== 'undefined';
+const isConfigured = !!convexUrl && convexUrl !== 'undefined' && convexUrl.startsWith('http');
 
-// Cliente oficial do Convex
 const client = isConfigured ? new ConvexHttpClient(convexUrl) : null;
 
 export const databaseService = {
+  getConvexUrl(): string {
+    return convexUrl;
+  },
+
   isConnected(): boolean {
-    return !!client;
+    return isConfigured && !!client;
   },
 
   async uploadFile(bucket: 'videos' | 'avatars', file: File | Blob, path: string): Promise<string | null> {
-    if (!client || !isConfigured) return URL.createObjectURL(file);
+    if (!isConfigured) {
+      console.warn("Convex não configurado. Usando URL temporária.");
+      return URL.createObjectURL(file);
+    }
 
     try {
-      // 1. Pede ao Convex uma URL temporária de upload
-      const uploadUrlResponse = await fetch(`${convexUrl}/api/mutation/media/generateUploadUrl`, { method: "POST" });
-      const { uploadUrl } = await uploadUrlResponse.json();
+      // 1. Gera URL de upload via mutação
+      const uploadUrlResponse = await fetch(`${convexUrl}/api/mutation/media/generateUploadUrl`, { 
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ args: {} })
+      });
+      const uploadData = await uploadUrlResponse.json();
+      const uploadUrl = uploadData.value;
 
-      // 2. Faz o upload do binário diretamente
+      // 2. Faz o upload do binário diretamente para a URL gerada
       const result = await fetch(uploadUrl, {
         method: "POST",
         headers: { "Content-Type": file.type },
@@ -30,13 +41,14 @@ export const databaseService = {
       });
       const { storageId } = await result.json();
 
-      // 3. Pede a URL pública permanente
+      // 3. Obtém a URL pública do arquivo
       const getUrlResponse = await fetch(`${convexUrl}/api/query/media/getPublicUrl`, {
         method: "POST",
-        body: JSON.stringify({ storageId })
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ args: { storageId } })
       });
-      const { url } = await getUrlResponse.json();
-      return url;
+      const urlData = await getUrlResponse.json();
+      return urlData.value;
     } catch (error) {
       console.error("Erro no Storage do Convex:", error);
       return null;
@@ -44,26 +56,32 @@ export const databaseService = {
   },
 
   async updatePresence(username: string): Promise<void> {
-    if (!client) return;
+    if (!isConfigured) return;
     try {
       await fetch(`${convexUrl}/api/mutation/profiles/updatePresence`, {
         method: 'POST',
-        body: JSON.stringify({ username, lastSeen: Date.now() })
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ args: { username, lastSeen: Date.now() } })
       });
     } catch (e) {}
   },
 
   async getVideos(): Promise<Video[] | null> {
-    if (!client) {
+    if (!isConfigured) {
       const local = localStorage.getItem('CORE_VIDEOS');
       return local ? JSON.parse(local) : INITIAL_VIDEOS;
     }
     try {
-      const response = await fetch(`${convexUrl}/api/query/videos/list`);
-      const videos = await response.json();
+      const response = await fetch(`${convexUrl}/api/query/videos/list`, {
+        method: 'POST',
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ args: {} })
+      });
+      const data = await response.json();
+      const videos = data.value || [];
       return videos.map((v: any) => ({
         ...v,
-        id: v._id || v.id
+        id: v.id || v._id
       }));
     } catch (error) {
       return INITIAL_VIDEOS;
@@ -71,7 +89,7 @@ export const databaseService = {
   },
 
   async saveVideo(video: Video): Promise<void> {
-    if (!client) {
+    if (!isConfigured) {
       const current = await this.getVideos() || [];
       const updated = [video, ...current.filter(v => v.id !== video.id)];
       localStorage.setItem('CORE_VIDEOS', JSON.stringify(updated));
@@ -80,26 +98,32 @@ export const databaseService = {
     try {
       await fetch(`${convexUrl}/api/mutation/videos/save`, {
         method: 'POST',
-        body: JSON.stringify(video)
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ args: video })
       });
     } catch (error) {}
   },
 
   async getProfiles(): Promise<any[] | null> {
-    if (!client) {
+    if (!isConfigured) {
       const local = localStorage.getItem('CORE_PROFILES');
       return local ? JSON.parse(local) : [];
     }
     try {
-      const response = await fetch(`${convexUrl}/api/query/profiles/list`);
-      return await response.json();
+      const response = await fetch(`${convexUrl}/api/query/profiles/list`, {
+        method: 'POST',
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ args: {} })
+      });
+      const data = await response.json();
+      return data.value || [];
     } catch (error) {
       return [];
     }
   },
 
   async saveProfile(account: any): Promise<void> {
-    if (!client) {
+    if (!isConfigured) {
       const current = await this.getProfiles() || [];
       const updated = [account, ...current.filter(a => a.profile.username !== account.profile.username)];
       localStorage.setItem('CORE_PROFILES', JSON.stringify(updated));
@@ -108,7 +132,8 @@ export const databaseService = {
     try {
       await fetch(`${convexUrl}/api/mutation/profiles/save`, {
         method: 'POST',
-        body: JSON.stringify(account)
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ args: account })
       });
     } catch (error) {}
   }
