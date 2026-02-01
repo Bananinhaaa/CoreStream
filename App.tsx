@@ -27,6 +27,7 @@ interface AccountData {
 const MASTER_ADMIN_EMAIL = 'davielucas914@gmail.com';
 const SESSION_KEY = 'CORE_SESSION_ACTIVE';
 const ACTIVE_USER_KEY = 'CORE_ACTIVE_USERNAME';
+const PROFILES_STORAGE_KEY = 'CORE_PROFILES_V2';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('home');
@@ -36,10 +37,9 @@ const App: React.FC = () => {
   const [isDataReady, setIsDataReady] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(() => localStorage.getItem(SESSION_KEY) === 'true');
   
-  // Estado de contas robusto com persistência imediata
   const [accounts, setAccounts] = useState<AccountData[]>(() => {
     try {
-      const local = localStorage.getItem('CORE_PROFILES');
+      const local = localStorage.getItem(PROFILES_STORAGE_KEY);
       return local ? JSON.parse(local) : [];
     } catch (e) { return []; }
   });
@@ -54,13 +54,42 @@ const App: React.FC = () => {
   const [currentUsername, setCurrentUsername] = useState<string | null>(() => localStorage.getItem(ACTIVE_USER_KEY));
   const isSyncingRef = useRef(false);
 
-  // Função mestre de sincronização
+  // Função para normalizar perfis (Trata dados da Nuvem e Local)
+  const normalizeAccount = (p: any): AccountData | null => {
+    const username = p.username || (p.profile && p.profile.username);
+    if (!username) return null;
+
+    const profile: UserProfile = {
+      username: username,
+      displayName: p.displayName || (p.profile && p.profile.displayName) || username,
+      bio: p.bio || (p.profile && p.profile.bio) || '',
+      avatar: p.avatar || (p.profile && p.profile.avatar) || p.avatarUrl || '',
+      email: p.email || (p.profile && p.profile.email) || '',
+      followers: Number(p.followers ?? (p.profile && p.profile.followers) ?? 0),
+      following: Number(p.following ?? (p.profile && p.profile.following) ?? 0),
+      likes: Number(p.likes ?? (p.profile && p.profile.likes) ?? 0),
+      isVerified: !!(p.isVerified ?? (p.profile && p.profile.isVerified)),
+      isAdmin: !!(p.isAdmin ?? (p.profile && p.profile.isAdmin)),
+      isBanned: !!(p.isBanned ?? (p.profile && p.profile.isBanned)),
+      profileColor: p.profileColor || (p.profile && p.profile.profileColor) || '#000000',
+      repostedVideoIds: p.repostedVideoIds || (p.profile && p.profile.repostedVideoIds) || [],
+      notifications: p.notifications || (p.profile && p.profile.notifications) || [],
+      lastSeen: p.lastSeen || (p.profile && p.profile.lastSeen) || Date.now()
+    };
+
+    return {
+      profile,
+      followingMap: p.followingMap || {},
+      email: p.email || profile.email,
+      password: p.password || ''
+    };
+  };
+
   const loadData = useCallback(async () => {
     if (isSyncingRef.current) return;
     isSyncingRef.current = true;
 
     try {
-      console.log("CORE: Sincronizando com a nuvem...");
       const [globalVideos, rawProfiles] = await Promise.all([
         databaseService.getVideos(),
         databaseService.getProfiles()
@@ -70,49 +99,26 @@ const App: React.FC = () => {
         setAccounts(prev => {
           const remoteMap = new Map<string, AccountData>();
           
-          rawProfiles.forEach((p: any) => {
-            // Se vier do banco (Convex), os dados vêm "achatados"
-            // Se vier do localStorage, pode vir aninhado. Tratamos ambos:
-            const username = p.username || (p.profile && p.profile.username);
-            if (!username) return;
-
-            const profileData: UserProfile = {
-              username: username,
-              displayName: p.displayName || (p.profile && p.profile.displayName) || username,
-              bio: p.bio || (p.profile && p.profile.bio) || '',
-              avatar: p.avatar || (p.profile && p.profile.avatar) || '',
-              email: p.email || (p.profile && p.profile.email) || '',
-              followers: Number(p.followers ?? (p.profile && p.profile.followers) ?? 0),
-              following: Number(p.following ?? (p.profile && p.profile.following) ?? 0),
-              likes: Number(p.likes ?? (p.profile && p.profile.likes) ?? 0),
-              isVerified: !!(p.isVerified ?? (p.profile && p.profile.isVerified)),
-              isAdmin: !!(p.isAdmin ?? (p.profile && p.profile.isAdmin)),
-              isBanned: !!(p.isBanned ?? (p.profile && p.profile.isBanned)),
-              profileColor: p.profileColor || (p.profile && p.profile.profileColor) || '#000000',
-              repostedVideoIds: p.repostedVideoIds || (p.profile && p.profile.repostedVideoIds) || [],
-              notifications: p.notifications || (p.profile && p.profile.notifications) || [],
-              lastSeen: p.lastSeen || (p.profile && p.profile.lastSeen) || Date.now()
-            };
-            
-            remoteMap.set(username, {
-              profile: profileData,
-              followingMap: p.followingMap || {},
-              email: p.email || profileData.email,
-              password: p.password || ''
-            });
+          rawProfiles.forEach(p => {
+            const acc = normalizeAccount(p);
+            if (acc) remoteMap.set(acc.profile.username, acc);
           });
 
-          // Unificamos: Cloud vence o Local, mas Local preserva o que ainda não subiu
-          const merged = Array.from(remoteMap.values());
+          // ESTRATÉGIA DE PRESERVAÇÃO:
+          // Começamos com os remotos, mas re-injetamos os locais que são importantes
+          const merged: AccountData[] = Array.from(remoteMap.values());
+          
           prev.forEach(localAcc => {
-            if (!remoteMap.has(localAcc.profile.username)) {
+            // Se a conta local for a ativa, garantimos que ela não suma mesmo se o cloud falhar
+            const isMissingFromRemote = !remoteMap.has(localAcc.profile.username);
+            const isActive = localAcc.profile.username === currentUsername;
+            
+            if (isMissingFromRemote && isActive) {
               merged.push(localAcc);
             }
           });
-          
-          if (merged.length > 0) {
-            localStorage.setItem('CORE_PROFILES', JSON.stringify(merged));
-          }
+
+          localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(merged));
           return merged;
         });
       }
@@ -127,18 +133,18 @@ const App: React.FC = () => {
         });
       }
     } catch (e) {
-      console.error("CORE: Erro de sincronização:", e);
+      console.warn("CORE: Sincronização em segundo plano falhou, usando cache local.");
     } finally {
       setIsDataReady(true);
       setIsLoading(false);
       isSyncingRef.current = false;
     }
-  }, []);
+  }, [currentUsername]);
 
   useEffect(() => {
     loadData();
-    const syncInterval = setInterval(loadData, 15000); 
-    return () => clearInterval(syncInterval);
+    const interval = setInterval(loadData, 10000);
+    return () => clearInterval(interval);
   }, [loadData]);
 
   const activeAccount = useMemo(() => {
@@ -212,13 +218,13 @@ const App: React.FC = () => {
     });
   }, [videos, handleUpdateVideoStats]);
 
-  // UI DE CARREGAMENTO INICIAL
+  // UI de Login/Splash
   if (isLoading && accounts.length === 0) {
     return (
       <div className="h-screen bg-black flex flex-col items-center justify-center p-12 text-center">
         <Logo size={100} className="mb-12 animate-pulse" />
         <h2 className="text-xl font-black italic uppercase tracking-tighter mb-2">CORE CLOUD</h2>
-        <p className="text-[10px] font-black uppercase tracking-[0.4em] text-white/40">Conectando ao Fluxo...</p>
+        <p className="text-[10px] font-black uppercase tracking-[0.4em] text-white/40">Sincronizando Identidades...</p>
       </div>
     );
   }
@@ -256,22 +262,18 @@ const App: React.FC = () => {
     );
   }
 
-  // Se logado mas sem conta ativa após sincronia completa
   if (!activeAccount && isDataReady) {
-    console.error("CORE: Sessão corrompida. Deslogando...");
-    handleLogout();
-    return null;
-  }
-
-  // Caso esteja em transição de sessão
-  if (!activeAccount) {
+    // Se logado mas conta sumiu, tentamos restaurar o backup
     return (
       <div className="h-screen bg-black flex flex-col items-center justify-center p-12 text-center">
-        <Logo size={80} className="mb-8 animate-pulse opacity-40" />
-        <p className="text-[9px] font-black uppercase tracking-[0.4em] text-white/40">Validando Identidade...</p>
+        <Logo size={60} className="mb-8 opacity-20" />
+        <p className="text-[10px] font-black uppercase text-rose-500 mb-8">Conta Local Corrompida</p>
+        <button onClick={handleLogout} className="bg-white text-black px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest">Reiniciar Sessão</button>
       </div>
     );
   }
+
+  if (!activeAccount) return null;
 
   const profileToRender = viewingUser ? accounts.find(a => a.profile.username === viewingUser)?.profile : activeAccount.profile;
 

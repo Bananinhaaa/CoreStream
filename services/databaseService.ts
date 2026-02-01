@@ -4,6 +4,7 @@ import { INITIAL_VIDEOS } from '../constants';
 
 const convexUrl = (import.meta as any).env?.VITE_CONVEX_URL || '';
 const isConfigured = !!convexUrl && convexUrl !== 'undefined' && convexUrl.includes('.cloud');
+const PROFILES_STORAGE_KEY = 'CORE_PROFILES_V2';
 
 const blobToBase64 = (blob: Blob): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -64,7 +65,7 @@ export const databaseService = {
     try {
       const response = await fetch(`${convexUrl}/listVideos`, { method: 'POST' });
       const data = await response.json();
-      return data.value || localData;
+      return Array.isArray(data.value) ? data.value : localData;
     } catch (e) { return localData; }
   },
 
@@ -84,13 +85,12 @@ export const databaseService = {
   },
 
   async getProfiles(): Promise<any[] | null> {
-    const local = localStorage.getItem('CORE_PROFILES');
+    const local = localStorage.getItem(PROFILES_STORAGE_KEY);
     const localData = local ? JSON.parse(local) : [];
     if (!isConfigured) return localData;
     try {
       const response = await fetch(`${convexUrl}/listProfiles`, { method: 'POST' });
       const data = await response.json();
-      // Garantir que estamos enviando uma lista de objetos
       return Array.isArray(data.value) ? data.value : localData;
     } catch (e) { return localData; }
   },
@@ -98,12 +98,21 @@ export const databaseService = {
   async saveProfile(account: any): Promise<void> {
     if (isConfigured) {
       try {
-        // Normaliza o objeto antes de enviar para garantir compatibilidade com o mutation do Convex
+        // Normalizamos para o backend (campos achatados)
         const payload = {
           profile: account.profile,
+          username: account.profile.username,
+          displayName: account.profile.displayName,
+          bio: account.profile.bio,
+          avatar: account.profile.avatar,
           email: account.email,
           password: account.password || '',
-          followingMap: account.followingMap || {}
+          followingMap: account.followingMap || {},
+          isVerified: !!account.profile.isVerified,
+          isAdmin: !!account.profile.isAdmin,
+          followers: account.profile.followers || 0,
+          following: account.profile.following || 0,
+          likes: account.profile.likes || 0
         };
         
         await fetch(`${convexUrl}/saveProfile`, {
@@ -111,17 +120,16 @@ export const databaseService = {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
-        console.log("CORE: Perfil sincronizado com sucesso.");
       } catch (e) { console.error("CORE: Erro ao salvar perfil nuvem:", e); }
     }
     
-    // Cache Local sempre atualizado
-    const current = JSON.parse(localStorage.getItem('CORE_PROFILES') || '[]');
+    // Cache Local (Formato completo AccountData)
+    const current = JSON.parse(localStorage.getItem(PROFILES_STORAGE_KEY) || '[]');
     const updated = [account, ...current.filter((a: any) => {
-      const uname = a.profile ? a.profile.username : (a.username || '');
-      const targetName = account.profile ? account.profile.username : (account.username || '');
-      return uname !== targetName;
+      const u1 = a.profile?.username || a.username;
+      const u2 = account.profile?.username || account.username;
+      return u1 !== u2;
     })];
-    localStorage.setItem('CORE_PROFILES', JSON.stringify(updated));
+    localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(updated));
   }
 };
