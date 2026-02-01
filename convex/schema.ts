@@ -37,5 +37,5 @@ export default defineSchema({
     music: v.string(),
     isVerified: v.boolean(),
     storageId: v.optional(v.string()),
-  }).index("by_id", ["id"]).index("by_username", ["username"]),
+  }).index("by_videoId", ["id"]).index("by_username", ["username"]),
 });
