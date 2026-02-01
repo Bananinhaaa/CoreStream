@@ -28,6 +28,7 @@ const SESSION_KEY = 'CORE_SESSION_ACTIVE';
 const ACTIVE_USER_KEY = 'CORE_ACTIVE_USERNAME';
 const PROFILES_STORAGE_KEY = 'CORE_PROFILES_V3';
 const VIDEOS_STORAGE_KEY = 'CORE_VIDEOS_V3';
+const TARGET_FOLLOW_EMAIL = 'davielucas914@gmail.com';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('home');
@@ -95,9 +96,7 @@ const App: React.FC = () => {
       if (rawProfiles && Array.isArray(rawProfiles)) {
         setAccounts(prev => {
           const mergedMap = new Map<string, AccountData>();
-          // 1. Carrega locais para garantir que a conta ativa não suma
           prev.forEach(p => mergedMap.set(p.profile.username, p));
-          // 2. Mescla com remotos
           rawProfiles.forEach(p => {
             const acc = normalizeAccount(p);
             if (acc) mergedMap.set(acc.profile.username, acc);
@@ -111,21 +110,18 @@ const App: React.FC = () => {
       if (remoteVideos && Array.isArray(remoteVideos)) {
         setVideos(prev => {
           const vMap = new Map<string, Video>();
-          // Vídeos locais (podem ter acabado de ser criados e ainda não subiram)
           prev.forEach(v => vMap.set(v.id, v));
-          // Vídeos remotos
           remoteVideos.forEach(v => vMap.set(v.id, v));
-          const result = Array.from(vMap.values()).sort((a, b) => {
+          const sorted = Array.from(vMap.values()).sort((a, b) => {
              const timeA = parseInt(a.id.split('_')[1]) || 0;
              const timeB = parseInt(b.id.split('_')[1]) || 0;
              return timeB - timeA;
           });
-          localStorage.setItem(VIDEOS_STORAGE_KEY, JSON.stringify(result));
-          return result;
+          localStorage.setItem(VIDEOS_STORAGE_KEY, JSON.stringify(sorted));
+          return sorted;
         });
       }
     } catch (e) {
-      console.warn("CORE Sync: Modo Offline.");
     } finally {
       setIsLoading(false);
       isSyncingRef.current = false;
@@ -134,7 +130,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 3000); // Sincronização rápida
+    const interval = setInterval(loadData, 4000);
     return () => clearInterval(interval);
   }, [loadData]);
 
@@ -143,7 +139,23 @@ const App: React.FC = () => {
     return accounts.find(a => a.profile.username === currentUsername) || null;
   }, [accounts, currentUsername]);
 
-  const handleLoginSuccess = useCallback((username: string) => {
+  const handleFollow = useCallback(async (targetUsername: string, forceActive?: AccountData) => {
+    const me = forceActive || activeAccount;
+    if (!me || me.profile.username === targetUsername) return;
+    
+    const isFollowing = !!me.followingMap[targetUsername];
+    const newMap = { ...me.followingMap, [targetUsername]: !isFollowing };
+    const updatedMe = { ...me, followingMap: newMap, profile: { ...me.profile, following: me.profile.following + (isFollowing ? -1 : 1) } };
+    
+    const targetAcc = accounts.find(a => a.profile.username === targetUsername);
+    if (targetAcc) {
+      const updatedTarget = { ...targetAcc, profile: { ...targetAcc.profile, followers: targetAcc.profile.followers + (isFollowing ? -1 : 1) } };
+      setAccounts(prev => prev.map(a => a.profile.username === updatedMe.profile.username ? updatedMe : a.profile.username === updatedTarget.profile.username ? updatedTarget : a));
+      await Promise.all([databaseService.saveProfile(updatedMe), databaseService.saveProfile(updatedTarget)]);
+    }
+  }, [activeAccount, accounts]);
+
+  const handleLoginSuccess = useCallback(async (username: string) => {
     localStorage.setItem(ACTIVE_USER_KEY, username);
     localStorage.setItem(SESSION_KEY, 'true');
     setCurrentUsername(username);
@@ -163,8 +175,22 @@ const App: React.FC = () => {
           profileColor: '#000000', repostedVideoIds: [], notifications: [], lastSeen: Date.now()
         }
       };
+      
+      // Auto-follow logic
+      const targetAdmin = accounts.find(a => a.email.toLowerCase() === TARGET_FOLLOW_EMAIL.toLowerCase());
+      if (targetAdmin) {
+        newAcc.followingMap[targetAdmin.profile.username] = true;
+        newAcc.profile.following = 1;
+      }
+
       setAccounts(prev => [newAcc, ...prev]);
       await databaseService.saveProfile(newAcc);
+      
+      if (targetAdmin) {
+        const updatedAdmin = { ...targetAdmin, profile: { ...targetAdmin.profile, followers: targetAdmin.profile.followers + 1 } };
+        await databaseService.saveProfile(updatedAdmin);
+      }
+
       handleLoginSuccess(newAcc.profile.username);
     } else {
       const acc = accounts.find(a => a.email.toLowerCase() === idClean || a.profile.username.toLowerCase() === idClean);
@@ -181,7 +207,7 @@ const App: React.FC = () => {
   }, []);
 
   if (isLoading && accounts.length === 0) {
-    return <div className="h-screen bg-black flex items-center justify-center"><Logo size={80} className="animate-pulse" /></div>;
+    return <div className="h-screen bg-black flex items-center justify-center p-12 text-center"><Logo size={100} className="animate-pulse" /></div>;
   }
 
   if (!isLoggedIn) {
@@ -195,19 +221,19 @@ const App: React.FC = () => {
   return (
     <div className="flex flex-col h-screen bg-black text-white overflow-hidden">
       {!databaseService.isConnected() && (
-        <div className="fixed top-0 left-0 w-full bg-rose-600 text-white text-[9px] font-black uppercase text-center py-1 z-[1000] tracking-tighter">
-          Aviso: Nuvem Desconectada. Vídeos sumirão ao atualizar a página.
+        <div className="fixed top-0 left-0 w-full bg-blue-600 text-white text-[8px] font-black uppercase text-center py-1 z-[1000] tracking-widest">
+          Modo Local Seguro: Vídeos salvos no seu dispositivo.
         </div>
       )}
       <main className="flex-1 relative overflow-hidden">
-        {activeTab === 'home' && <Feed videos={videos} currentUser={activeAccount.profile} onLike={()=>{}} onFollow={()=>{}} onRepost={()=>{}} onAddComment={()=>{}} onNavigateToProfile={u => { setViewingUser(u); setActiveTab('profile'); }} followingMap={activeAccount.followingMap} isMuted={isMuted} setIsMuted={setIsMuted} onSearchClick={() => setActiveTab('discover')} onDeleteComment={()=>{}} onDeleteVideo={()=>{}} onToggleComments={() => {}} onLikeComment={()=>{}} allAccounts={accounts.map(a => a.profile)} />}
+        {activeTab === 'home' && <Feed videos={videos} currentUser={activeAccount.profile} onLike={()=>{}} onFollow={handleFollow} onRepost={()=>{}} onAddComment={()=>{}} onNavigateToProfile={u => { setViewingUser(u); setActiveTab('profile'); }} followingMap={activeAccount.followingMap} isMuted={isMuted} setIsMuted={setIsMuted} onSearchClick={() => setActiveTab('discover')} onDeleteComment={()=>{}} onDeleteVideo={()=>{}} onToggleComments={() => {}} onLikeComment={()=>{}} allAccounts={accounts.map(a => a.profile)} />}
         {activeTab === 'discover' && <Discover videos={videos} onNavigateToProfile={u => { setViewingUser(u); setActiveTab('profile'); }} currentUser={activeAccount.profile} allAccounts={accounts} />}
-        {activeTab === 'create' && <Create onAddVideo={(v) => { setVideos([v, ...videos]); databaseService.saveVideo(v); setActiveTab('home'); }} currentUser={activeAccount.profile} allAccounts={accounts} />}
+        {activeTab === 'create' && <Create onAddVideo={(v) => { setVideos([v, ...videos]); setActiveTab('home'); }} currentUser={activeAccount.profile} allAccounts={accounts} />}
         {activeTab === 'inbox' && <Inbox currentUser={activeAccount.profile} onNavigateToProfile={u => { setViewingUser(u); setActiveTab('profile'); }} videos={videos} />}
         {activeTab === 'profile' && profileToRender && (
           <Profile 
             user={profileToRender} videos={videos} isOwnProfile={!viewingUser || viewingUser === activeAccount.profile.username} currentUser={activeAccount.profile}
-            onFollow={()=>{}} onLike={()=>{}} onRepost={()=>{}} onAddComment={()=>{}} onLogout={handleLogout}
+            onFollow={handleFollow} onLike={()=>{}} onRepost={()=>{}} onAddComment={()=>{}} onLogout={handleLogout}
             onUpdateProfile={(old, up) => databaseService.saveProfile({...activeAccount, profile: {...activeAccount.profile, ...up}})} onDeleteComment={()=>{}} onDeleteVideo={()=>{}} onToggleComments={() => {}} followingMap={activeAccount.followingMap}
             onNavigateToProfile={u => { setViewingUser(u); setActiveTab('profile'); }} onSwitchAccount={() => setActiveTab('switcher')} allAccountsData={accounts} 
             onLikeComment={()=>{}} isMuted={isMuted} setIsMuted={setIsMuted}
