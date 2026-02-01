@@ -38,7 +38,12 @@ const Discover: React.FC<DiscoverProps> = ({ videos, onNavigateToProfile, curren
   }, [searchTerm, allAccounts]);
 
   const sortedUsers = useMemo(() => {
-    return [...filteredUsers].sort((a, b) => (b.profile.followers || 0) - (a.profile.followers || 0));
+    // Prioriza usuários verfificados ou com mais seguidores, mas mostra todos
+    return [...filteredUsers].sort((a, b) => {
+      if (a.profile.isVerified && !b.profile.isVerified) return -1;
+      if (!a.profile.isVerified && b.profile.isVerified) return 1;
+      return (b.profile.followers || 0) - (a.profile.followers || 0);
+    });
   }, [filteredUsers]);
 
   return (
@@ -92,31 +97,9 @@ const Discover: React.FC<DiscoverProps> = ({ videos, onNavigateToProfile, curren
           </section>
         )}
 
-        {trends.length > 0 && (
-          <section className="animate-view">
-             <div className="flex items-center justify-between mb-6 px-1">
-               <h3 className="text-[10px] font-black uppercase text-indigo-400 tracking-[0.4em]">Real-time Trends ⚡</h3>
-             </div>
-             <div className="flex gap-4 overflow-x-auto no-scrollbar pb-2">
-                {trends.map((chunk, idx) => (
-                  <a 
-                    key={idx}
-                    href={chunk.web?.uri}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="min-w-[240px] bg-white/5 border border-white/5 p-5 rounded-[2rem] hover:bg-indigo-600/10 transition-all group"
-                  >
-                    <p className="text-[9px] font-black text-gray-500 uppercase mb-2 group-hover:text-indigo-400 transition-colors truncate">{chunk.web?.title || 'Notícia Tech'}</p>
-                    <p className="text-xs font-medium text-white line-clamp-2 italic">Acompanhe no CoreStream</p>
-                  </a>
-                ))}
-             </div>
-          </section>
-        )}
-
         <section>
           <div className="flex items-center justify-between mb-6 px-1">
-            <h3 className="text-[10px] font-black uppercase text-white tracking-[0.4em]">Comunidade</h3>
+            <h3 className="text-[10px] font-black uppercase text-white tracking-[0.4em]">Comunidade Core</h3>
             <span className="text-[9px] font-black text-gray-600 uppercase tracking-widest">{sortedUsers.length}</span>
           </div>
           <div className="grid grid-cols-4 gap-x-4 gap-y-8">

@@ -37,29 +37,30 @@ export const databaseService = {
     try {
       const response = await fetch(`${convexUrl}/listVideos`, { method: 'POST' });
       const data = await response.json();
-      return Array.isArray(data.value) ? data.value : local;
+      // Retorna os vídeos da nuvem, mas se estiver vazio e tivermos locais, mantemos os locais
+      return Array.isArray(data.value) && data.value.length > 0 ? data.value : local;
     } catch (e) { return local; }
   },
 
   async saveVideo(video: Video): Promise<void> {
-    // Persistência local primeiro (mesmo que temporária para a URL do vídeo)
+    // 1. Salva localmente para feedback instantâneo
     const current = JSON.parse(localStorage.getItem(VIDEOS_STORAGE_KEY) || '[]');
     const updated = [video, ...current.filter((v: any) => v.id !== video.id)];
     localStorage.setItem(VIDEOS_STORAGE_KEY, JSON.stringify(updated));
 
+    // 2. Tenta subir para a nuvem
     if (isConfigured) {
       try {
-        await fetch(`${convexUrl}/saveVideo`, {
+        const response = await fetch(`${convexUrl}/saveVideo`, {
           method: 'POST',
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(video)
         });
+        if (!response.ok) throw new Error("Falha no upload para o Convex");
       } catch (e) { 
-        console.error("Erro ao salvar vídeo na nuvem:", e);
-        throw e; // Lança para que o Create saiba que falhou o sync
+        console.error("CORE Cloud Error:", e);
+        throw e;
       }
-    } else {
-      console.warn("CORE: Cloud não configurada. Vídeos salvos localmente desaparecerão ao recarregar se forem URLs blob.");
     }
   },
 
@@ -75,7 +76,7 @@ export const databaseService = {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ id })
         });
-      } catch (e) { console.error("Cloud Error (Delete Video):", e); }
+      } catch (e) {}
     }
   },
 
@@ -90,24 +91,26 @@ export const databaseService = {
   },
 
   async saveProfile(account: any): Promise<void> {
-    const current = JSON.parse(localStorage.getItem(PROFILES_STORAGE_KEY) || '[]');
-    const username = account.profile?.username || account.username;
-    
-    // Formatação robusta para garantir que o profile tenha os campos necessários
     const profile = account.profile || account;
     const email = account.email || profile.email;
     const password = account.password || '';
 
     const payload = {
-      profile: profile,
-      email: email,
-      password: password,
+      profile: {
+        ...profile,
+        lastSeen: Date.now()
+      },
+      email,
+      password,
       followingMap: account.followingMap || profile.followingMap || {}
     };
 
-    const updated = [payload, ...current.filter((a: any) => (a.profile?.username || a.username) !== username)];
+    // Salva local
+    const current = JSON.parse(localStorage.getItem(PROFILES_STORAGE_KEY) || '[]');
+    const updated = [payload, ...current.filter((a: any) => (a.profile?.username || a.username) !== profile.username)];
     localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(updated));
 
+    // Sincroniza Nuvem
     if (isConfigured) {
       try {
         await fetch(`${convexUrl}/saveProfile`, {
@@ -115,17 +118,15 @@ export const databaseService = {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
-      } catch (e) { console.error("Cloud Error (Profile):", e); }
+      } catch (e) {}
     }
   },
 
   async uploadFile(bucket: 'videos' | 'avatars', file: File | Blob, path: string): Promise<string | null> {
-    // Em modo offline, avatars são convertidos para Base64 para persistirem no LocalStorage
     if (bucket === 'avatars' && !isConfigured) {
       return await fileToBase64(file);
     }
     
-    // Vídeos são grandes demais para LocalStorage. Sem cloud, usamos Blob URL temporário.
     if (!isConfigured) return URL.createObjectURL(file);
 
     try {

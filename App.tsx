@@ -93,18 +93,17 @@ const App: React.FC = () => {
         databaseService.getProfiles()
       ]);
       
+      // Sincronização de Perfis (Garante que outros usuários apareçam)
       if (rawProfiles && Array.isArray(rawProfiles)) {
         setAccounts(prev => {
-          const remoteMap = new Map<string, AccountData>();
+          const mergedMap = new Map<string, AccountData>();
+          // 1. Carrega o que já temos localmente
+          prev.forEach(p => mergedMap.set(p.profile.username, p));
+          // 2. Sobrepõe com o que vem da nuvem (dados mais recentes)
           rawProfiles.forEach(p => {
             const acc = normalizeAccount(p);
-            if (acc) remoteMap.set(acc.profile.username, acc);
+            if (acc) mergedMap.set(acc.profile.username, acc);
           });
-          
-          // Manter contas locais (como a logada) mesmo que o servidor atrase
-          const mergedMap = new Map<string, AccountData>();
-          prev.forEach(p => mergedMap.set(p.profile.username, p));
-          remoteMap.forEach((p, k) => mergedMap.set(k, p));
 
           const result = Array.from(mergedMap.values());
           localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(result));
@@ -112,21 +111,24 @@ const App: React.FC = () => {
         });
       }
 
+      // Sincronização de Vídeos (Garante que vídeos de todos apareçam)
       if (remoteVideos && Array.isArray(remoteVideos)) {
         setVideos(prev => {
           const vMap = new Map<string, Video>();
-          // Vídeos locais têm precedência (se acabaram de ser criados)
           prev.forEach(v => vMap.set(v.id, v));
-          // Vídeos remotos atualizam o feed
           remoteVideos.forEach(v => vMap.set(v.id, v));
           
-          const sorted = Array.from(vMap.values()).sort((a, b) => Number(b.id.split('_')[1] || b.id) - Number(a.id.split('_')[1] || a.id));
+          const sorted = Array.from(vMap.values()).sort((a, b) => {
+             const timeA = parseInt(a.id.split('_')[1]) || 0;
+             const timeB = parseInt(b.id.split('_')[1]) || 0;
+             return timeB - timeA;
+          });
           localStorage.setItem(VIDEOS_STORAGE_KEY, JSON.stringify(sorted));
           return sorted;
         });
       }
     } catch (e) {
-      console.warn("CORE: Sincronização offline.");
+      console.warn("CORE Sync: Offline mode.");
     } finally {
       setIsLoading(false);
       isSyncingRef.current = false;
@@ -135,7 +137,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 5000); // Mais rápido para ver novos usuários
+    const interval = setInterval(loadData, 4000); // Poll agressivo para ver novos usuários
     return () => clearInterval(interval);
   }, [loadData]);
 
@@ -144,7 +146,7 @@ const App: React.FC = () => {
       databaseService.updatePresence(currentUsername);
       const pInterval = setInterval(() => {
         databaseService.updatePresence(currentUsername);
-      }, 10000); // Pulso mais frequente
+      }, 10000);
       return () => clearInterval(pInterval);
     }
   }, [currentUsername, isLoggedIn]);
@@ -251,6 +253,13 @@ const App: React.FC = () => {
 
   return (
     <div className="flex flex-col h-screen bg-black text-white overflow-hidden">
+      {/* Aviso de Modo Offline para Vídeos */}
+      {!databaseService.isConnected() && (
+        <div className="fixed top-0 left-0 w-full bg-amber-500 text-black text-[8px] font-black uppercase text-center py-1 z-[1000] tracking-widest">
+          Modo Local: Vídeos são apagados após fechar a página (Conecte o Convex)
+        </div>
+      )}
+
       <main className="flex-1 relative overflow-hidden">
         {activeTab === 'home' && <Feed videos={videos} currentUser={activeAccount.profile} onLike={handleLikeVideo} onFollow={handleFollow} onRepost={()=>{}} onAddComment={handleAddComment} onNavigateToProfile={u => { setViewingUser(u); setActiveTab('profile'); }} followingMap={activeAccount.followingMap} isMuted={isMuted} setIsMuted={setIsMuted} onSearchClick={() => setActiveTab('discover')} onDeleteComment={()=>{}} onDeleteVideo={handleDeleteVideo} onToggleComments={() => {}} onLikeComment={()=>{}} allAccounts={accounts.map(a => a.profile)} />}
         {activeTab === 'discover' && <Discover videos={videos} onNavigateToProfile={u => { setViewingUser(u); setActiveTab('profile'); }} currentUser={activeAccount.profile} allAccounts={accounts} />}
