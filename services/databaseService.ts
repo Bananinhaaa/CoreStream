@@ -33,10 +33,24 @@ export const databaseService = {
 
   async updatePresence(username: string): Promise<void> {
     if (!isConfigured) return;
+    const now = Date.now();
     fetch(`${convexUrl}/updatePresence`, {
       method: 'POST',
-      body: JSON.stringify({ username, lastSeen: Date.now() })
-    }).catch(() => {});
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, lastSeen: now })
+    }).catch((err) => console.warn("Erro ao atualizar presença:", err));
+    
+    // Backup local do status online para feedback imediato
+    const localProfiles = JSON.parse(localStorage.getItem('CORE_PROFILES') || '[]');
+    const updated = localProfiles.map((p: any) => {
+      const uname = p.profile ? p.profile.username : p.username;
+      if (uname === username) {
+        if (p.profile) p.profile.lastSeen = now;
+        else p.lastSeen = now;
+      }
+      return p;
+    });
+    localStorage.setItem('CORE_PROFILES', JSON.stringify(updated));
   },
 
   async getVideos(): Promise<Video[] | null> {
@@ -65,6 +79,7 @@ export const databaseService = {
     if (isConfigured) {
       fetch(`${convexUrl}/saveVideo`, {
         method: 'POST',
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(video)
       }).catch(console.error);
     }
@@ -90,12 +105,17 @@ export const databaseService = {
   async saveProfile(account: any): Promise<void> {
     // Backup local imediato
     const current = JSON.parse(localStorage.getItem('CORE_PROFILES') || '[]');
-    const updated = [account, ...current.filter((a: any) => a.profile.username !== account.profile.username)];
+    const updated = [account, ...current.filter((a: any) => {
+      const uname = a.profile ? a.profile.username : a.username;
+      const targetName = account.profile ? account.profile.username : account.username;
+      return uname !== targetName;
+    })];
     localStorage.setItem('CORE_PROFILES', JSON.stringify(updated));
 
     if (isConfigured) {
       fetch(`${convexUrl}/saveProfile`, {
         method: 'POST',
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(account)
       }).catch(console.error);
     }

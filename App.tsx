@@ -36,7 +36,6 @@ const App: React.FC = () => {
   const [isDataReady, setIsDataReady] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(() => localStorage.getItem(SESSION_KEY) === 'true');
   
-  // Inicializa contas do localStorage para evitar que activeAccount seja null no primeiro render
   const [accounts, setAccounts] = useState<AccountData[]>(() => {
     const local = localStorage.getItem('CORE_PROFILES');
     return local ? JSON.parse(local) : [];
@@ -51,15 +50,44 @@ const App: React.FC = () => {
 
   const loadData = useCallback(async () => {
     try {
-      const [globalVideos, globalProfiles] = await Promise.all([
+      const [globalVideos, rawProfiles] = await Promise.all([
         databaseService.getVideos(),
         databaseService.getProfiles()
       ]);
       
-      if (globalProfiles && globalProfiles.length > 0) {
-        setAccounts(globalProfiles);
-        localStorage.setItem('CORE_PROFILES', JSON.stringify(globalProfiles));
+      if (rawProfiles && rawProfiles.length > 0) {
+        // O Convex retorna objetos planos. Precisamos normalizar para AccountData
+        const normalized: AccountData[] = rawProfiles.map((p: any) => {
+          // Se já vier normalizado (cache local), mantém. Se vier do Convex (flat), converte.
+          if (p.profile) return p;
+          
+          return {
+            profile: { 
+              username: p.username,
+              displayName: p.displayName,
+              bio: p.bio || '',
+              avatar: p.avatar || '',
+              followers: p.followers || 0,
+              following: p.following || 0,
+              likes: p.likes || 0,
+              isVerified: p.isVerified || false,
+              isAdmin: p.isAdmin || false,
+              isBanned: p.isBanned || false,
+              profileColor: p.profileColor || '#000000',
+              repostedVideoIds: p.repostedVideoIds || [],
+              notifications: p.notifications || [],
+              lastSeen: p.lastSeen || Date.now()
+            },
+            followingMap: p.followingMap || {},
+            email: p.email,
+            password: p.password
+          };
+        });
+        
+        setAccounts(normalized);
+        localStorage.setItem('CORE_PROFILES', JSON.stringify(normalized));
       }
+
       if (globalVideos) {
         setVideos(globalVideos);
         localStorage.setItem('CORE_VIDEOS', JSON.stringify(globalVideos));
@@ -74,13 +102,18 @@ const App: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 15000);
-    return () => clearInterval(interval);
+    const syncInterval = setInterval(loadData, 15000); // Atualiza dados a cada 15s
+    return () => clearInterval(syncInterval);
   }, [loadData]);
 
+  // Heartbeat de Presença: Avisa ao Convex que o usuário está online a cada 30 segundos
   useEffect(() => {
     if (isLoggedIn && currentUsername) {
       databaseService.updatePresence(currentUsername);
+      const heartbeat = setInterval(() => {
+        databaseService.updatePresence(currentUsername);
+      }, 30000); 
+      return () => clearInterval(heartbeat);
     }
   }, [isLoggedIn, currentUsername]);
 
@@ -130,7 +163,6 @@ const App: React.FC = () => {
     });
   }, []);
 
-  // Correcting syntax error: replaced </const> with proper closing of useCallback and comma
   const handleLikeVideo = useCallback((videoId: string) => {
     const targetVideo = videos.find(v => v.id === videoId);
     if (!targetVideo) return;
