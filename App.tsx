@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Video, UserProfile, Notification, Comment } from './types';
 import { INITIAL_VIDEOS } from './constants';
 import { databaseService } from './services/databaseService';
@@ -47,85 +47,103 @@ const App: React.FC = () => {
   });
 
   const [currentUsername, setCurrentUsername] = useState<string | null>(() => localStorage.getItem(ACTIVE_USER_KEY));
+  const isSyncingRef = useRef(false);
 
   const loadData = useCallback(async () => {
+    if (isSyncingRef.current) return;
+    isSyncingRef.current = true;
+
     try {
       const [globalVideos, rawProfiles] = await Promise.all([
         databaseService.getVideos(),
         databaseService.getProfiles()
       ]);
       
-      if (rawProfiles && rawProfiles.length > 0) {
-        const normalized: AccountData[] = rawProfiles.map((p: any) => {
-          // Se o dado vier do Convex, ele vem achatado. Reestruturamos para o App.
-          // Add missing email property to UserProfile
-          const profile: UserProfile = {
-            username: p.username,
-            displayName: p.displayName || p.username,
-            bio: p.bio || '',
-            avatar: p.avatar || '',
-            email: p.email || '',
-            followers: p.followers || 0,
-            following: p.following || 0,
-            likes: p.likes || 0,
-            isVerified: p.isVerified || false,
-            isAdmin: p.isAdmin || false,
-            isBanned: p.isBanned || false,
-            profileColor: p.profileColor || '#000000',
-            repostedVideoIds: p.repostedVideoIds || [],
-            notifications: p.notifications || [],
-            lastSeen: p.lastSeen || Date.now()
-          };
-          return {
-            profile,
-            followingMap: p.followingMap || {},
-            email: p.email || '',
-            password: p.password || ''
-          };
+      if (rawProfiles && Array.isArray(rawProfiles)) {
+        setAccounts(prev => {
+          const remoteMap = new Map();
+          rawProfiles.forEach((p: any) => {
+            const profile: UserProfile = {
+              username: p.username,
+              displayName: p.displayName || p.username,
+              bio: p.bio || '',
+              avatar: p.avatar || '',
+              email: p.email || '',
+              followers: p.followers || 0,
+              following: p.following || 0,
+              likes: p.likes || 0,
+              isVerified: p.isVerified || false,
+              isAdmin: p.isAdmin || false,
+              isBanned: p.isBanned || false,
+              profileColor: p.profileColor || '#000000',
+              repostedVideoIds: p.repostedVideoIds || [],
+              notifications: p.notifications || [],
+              lastSeen: p.lastSeen || Date.now()
+            };
+            remoteMap.set(p.username, {
+              profile,
+              followingMap: p.followingMap || {},
+              email: p.email || '',
+              password: p.password || ''
+            });
+          });
+
+          // Fazemos o merge: Mantemos contas locais que não estão no servidor ainda (evita sumir no login)
+          const localOnly = prev.filter(a => !remoteMap.has(a.profile.username));
+          const merged = [...Array.from(remoteMap.values()), ...localOnly];
+          
+          localStorage.setItem('CORE_PROFILES', JSON.stringify(merged));
+          return merged;
         });
-        setAccounts(normalized);
-        localStorage.setItem('CORE_PROFILES', JSON.stringify(normalized));
       }
 
-      if (globalVideos && globalVideos.length > 0) {
-        setVideos(globalVideos);
-        localStorage.setItem('CORE_VIDEOS', JSON.stringify(globalVideos));
+      if (globalVideos && Array.isArray(globalVideos)) {
+        setVideos(prev => {
+          const remoteIds = new Set(globalVideos.map(v => v.id));
+          const localOnly = prev.filter(v => !remoteIds.has(v.id));
+          const merged = [...globalVideos, ...localOnly];
+          localStorage.setItem('CORE_VIDEOS', JSON.stringify(merged));
+          return merged;
+        });
       }
       setIsDataReady(true);
     } catch (e) {
       console.error("Erro na sincronização CORE:", e);
     } finally {
       setIsLoading(false);
+      isSyncingRef.current = false;
     }
   }, []);
 
-  // Sincronização agressiva para que o navegador 2 veja o navegador 1 quase instantaneamente
   useEffect(() => {
     loadData();
-    const syncInterval = setInterval(loadData, 5000); // 5 segundos para feeling de tempo real
+    const syncInterval = setInterval(loadData, 5000); 
     return () => clearInterval(syncInterval);
   }, [loadData]);
 
   useEffect(() => {
     if (isLoggedIn && currentUsername) {
       databaseService.updatePresence(currentUsername);
-      const heartbeat = setInterval(() => {
-        databaseService.updatePresence(currentUsername);
-      }, 10000); 
-      return () => clearInterval(heartbeat);
     }
   }, [isLoggedIn, currentUsername]);
 
   const activeAccount = useMemo(() => {
     if (!currentUsername || accounts.length === 0) return null;
     const acc = accounts.find(a => a.profile.username === currentUsername);
-    if (!acc) return null;
-    if (acc.email.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase()) {
+    if (acc && acc.email.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase()) {
       acc.profile.isAdmin = true;
       acc.profile.isVerified = true;
     }
     return acc;
   }, [accounts, currentUsername]);
+
+  // Se estamos logados mas a conta "sumiu" da lista, tentamos carregar dados de novo
+  useEffect(() => {
+    if (isLoggedIn && currentUsername && !activeAccount && !isLoading) {
+      console.warn("CORE: Conta ativa não encontrada na lista. Forçando reload...");
+      loadData();
+    }
+  }, [isLoggedIn, currentUsername, activeAccount, isLoading, loadData]);
 
   const handleUpdateAccountStats = useCallback(async (username: string, stats: any) => {
     setAccounts(prev => {
@@ -190,7 +208,7 @@ const App: React.FC = () => {
       <div className="h-screen bg-black flex flex-col items-center justify-center p-12 text-center">
         <Logo size={100} className="mb-12 animate-pulse" />
         <h2 className="text-xl font-black italic uppercase tracking-tighter mb-2">CORE CLOUD</h2>
-        <p className="text-[10px] font-black uppercase tracking-[0.4em] text-white/40">Sincronizando Identidade...</p>
+        <p className="text-[10px] font-black uppercase tracking-[0.4em] text-white/40">Iniciando Protocolos...</p>
       </div>
     );
   }
@@ -215,9 +233,9 @@ const App: React.FC = () => {
                 isBanned: false, profileColor: '#000000', lastSeen: Date.now()
               } 
             };
-            await databaseService.saveProfile(newAcc);
             setAccounts(prev => [...prev, newAcc]);
             handleLoginSuccess(newAcc.profile.username);
+            await databaseService.saveProfile(newAcc);
           } else if (existingIdx !== -1) {
             const acc = accounts[existingIdx];
             if (!pass || acc.password === pass) handleLoginSuccess(acc.profile.username);
@@ -228,13 +246,19 @@ const App: React.FC = () => {
     );
   }
 
+  // Tela de "Conectando" agora tem um botão de emergência caso a sincronização trave
   if (!activeAccount) {
     return (
-      <div className="h-screen bg-black flex flex-col items-center justify-center p-12 text-center">
-        <Logo size={60} className="mb-8 opacity-20" />
-        <h2 className="text-sm font-black italic uppercase tracking-widest mb-2">Conectando...</h2>
-        <p className="text-[9px] font-bold uppercase text-gray-500">Aguardando Sincronização de Perfil</p>
-        <button onClick={handleLogout} className="mt-20 text-[8px] font-black uppercase tracking-widest text-white/20 hover:text-white">Reiniciar Sessão</button>
+      <div className="h-screen bg-black flex flex-col items-center justify-center p-12 text-center animate-view">
+        <Logo size={60} className="mb-8 opacity-20 animate-pulse" />
+        <h2 className="text-sm font-black italic uppercase tracking-widest mb-2">Sincronizando...</h2>
+        <p className="text-[9px] font-bold uppercase text-gray-500 max-w-xs leading-relaxed">
+          Buscando seus dados na Core Cloud. Se demorar muito, tente reiniciar.
+        </p>
+        <div className="mt-16 space-y-4">
+          <button onClick={() => loadData()} className="text-[9px] font-black uppercase tracking-widest text-indigo-400 block mx-auto">Tentar Novamente</button>
+          <button onClick={handleLogout} className="text-[9px] font-black uppercase tracking-widest text-white/20 block mx-auto">Reiniciar Sessão</button>
+        </div>
       </div>
     );
   }
