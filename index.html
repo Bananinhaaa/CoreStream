@@ -13,43 +13,18 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="CoreStream" />
     
-    <!-- Ícone Padrão (Favicon) -->
+    <!-- Ícones PWA -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="alternate icon" href="/favicon.svg" />
-    
-    <!-- Apple Touch Icons (iOS precisa destes links explícitos) -->
     <link rel="apple-touch-icon" href="/favicon.svg" />
-    <link rel="apple-touch-icon" sizes="152x152" href="/favicon.svg" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/favicon.svg" />
-    <link rel="apple-touch-icon" sizes="167x167" href="/favicon.svg" />
-    
     <link rel="manifest" href="/manifest.json" />
     
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap" rel="stylesheet">
     
     <style>
-      :root {
-        --sat: env(safe-area-inset-top);
-        --sab: env(safe-area-inset-bottom);
-      }
-      body {
-        font-family: 'Inter', sans-serif;
-        background-color: #000;
-        color: white;
-        margin: 0;
-        padding: 0;
-        height: 100vh;
-        width: 100vw;
-        overflow: hidden;
-        -webkit-tap-highlight-color: transparent;
-        -webkit-touch-callout: none;
-      }
-      #root {
-        height: 100%;
-        padding-top: var(--sat);
-        padding-bottom: var(--sab);
-      }
+      :root { --sat: env(safe-area-inset-top); --sab: env(safe-area-inset-bottom); }
+      body { font-family: 'Inter', sans-serif; background-color: #000; color: white; margin: 0; padding: 0; height: 100vh; width: 100vw; overflow: hidden; -webkit-tap-highlight-color: transparent; }
+      #root { height: 100%; padding-top: var(--sat); padding-bottom: var(--sab); }
       .no-scrollbar::-webkit-scrollbar { display: none; }
       .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       .video-snap-container { scroll-snap-type: y mandatory; height: 100%; overflow-y: scroll; -webkit-overflow-scrolling: touch; }
@@ -66,9 +41,11 @@
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
     "react/": "https://esm.sh/react@^19.2.3/",
     "@google/genai": "https://esm.sh/@google/genai@^1.36.0",
+    "convex": "https://esm.sh/convex@^1.13.0",
+    "convex/browser": "https://esm.sh/convex@^1.13.0/browser",
     "vite": "https://esm.sh/vite@^7.3.1",
     "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
-    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.90.1"
+    "convex/": "https://esm.sh/convex@^1.31.7/"
   }
 }
 </script>
