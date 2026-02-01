@@ -68,7 +68,6 @@ export const databaseService = {
     const localJson = localStorage.getItem(VIDEOS_STORAGE_KEY);
     let videos: Video[] = localJson ? JSON.parse(localJson) : INITIAL_VIDEOS;
 
-    // Reconstrói as URLs dos vídeos locais a partir do IndexedDB
     const updatedVideos = await Promise.all(videos.map(async (v) => {
       if (v.url.startsWith('blob:') || !v.url.startsWith('http')) {
         const persistedUrl = await getVideoFile(v.id);
@@ -85,9 +84,7 @@ export const databaseService = {
       const remoteVideos = Array.isArray(data.value) ? data.value : [];
       
       const vMap = new Map();
-      // Prioridade para vídeos da nuvem (globais)
       remoteVideos.forEach((v: Video) => vMap.set(v.id, v));
-      // Adiciona vídeos locais que ainda não subiram
       updatedVideos.forEach((v: Video) => {
         if (!vMap.has(v.id)) vMap.set(v.id, v);
       });
@@ -97,17 +94,12 @@ export const databaseService = {
   },
 
   async saveVideo(video: Video, file?: File | Blob): Promise<void> {
-    // 1. Salva binário localmente (Impedir que suma no refresh)
-    if (file) {
-      await saveVideoFile(video.id, file);
-    }
+    if (file) await saveVideoFile(video.id, file);
 
-    // 2. Salva metadados localmente
     const current = JSON.parse(localStorage.getItem(VIDEOS_STORAGE_KEY) || '[]');
     const updated = [video, ...current.filter((v: any) => v.id !== video.id)];
     localStorage.setItem(VIDEOS_STORAGE_KEY, JSON.stringify(updated));
 
-    // 3. Salva na Nuvem
     if (isConfigured) {
       try {
         await fetch(`${convexUrl}/saveVideo`, {
@@ -115,7 +107,7 @@ export const databaseService = {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(video)
         });
-      } catch (e) { console.error("Falha no upload cloud:", e); }
+      } catch (e) { console.error("Cloud Save Error", e); }
     }
   },
 
@@ -133,6 +125,7 @@ export const databaseService = {
     const profile = account.profile || account;
     if (!profile.username) return;
 
+    // Garante que o email seja preservado para o sistema de busca
     const payload = {
       profile: { ...profile, lastSeen: Date.now() },
       email: account.email || profile.email || '',
@@ -140,7 +133,6 @@ export const databaseService = {
       followingMap: account.followingMap || profile.followingMap || {}
     };
 
-    // Cache local imediato
     const current = JSON.parse(localStorage.getItem(PROFILES_STORAGE_KEY) || '[]');
     const updated = [payload, ...current.filter((a: any) => (a.profile?.username || a.username) !== profile.username)];
     localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(updated));
@@ -152,7 +144,9 @@ export const databaseService = {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
-      } catch (e) {}
+      } catch (e) {
+        console.error("Convex Profile Save Error", e);
+      }
     }
   },
 
@@ -162,7 +156,6 @@ export const databaseService = {
       const response = await fetch(`${convexUrl}/api/mutation/media/generateUploadUrl`, { method: "POST" });
       const { value: uploadUrl } = await response.json();
       await fetch(uploadUrl, { method: "POST", body: file });
-      // Simulação simplificada para o exemplo, na vida real esperaria o storageId
       return null; 
     } catch (e) { return null; }
   }

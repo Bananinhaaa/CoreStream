@@ -54,7 +54,9 @@ const App: React.FC = () => {
   const [currentUsername, setCurrentUsername] = useState<string | null>(() => localStorage.getItem(ACTIVE_USER_KEY));
   const isSyncingRef = useRef(false);
 
+  // Normalizador resiliente: aceita dados mínimos do Convex
   const normalizeAccount = useCallback((p: any): AccountData | null => {
+    // Se o objeto for do Convex, os dados podem estar na raiz ou dentro de 'profile'
     const profileData = p.profile || p;
     const username = profileData.username;
     if (!username) return null;
@@ -77,9 +79,9 @@ const App: React.FC = () => {
         notifications: Array.isArray(profileData.notifications) ? profileData.notifications : [],
         lastSeen: Number(profileData.lastSeen || Date.now())
       },
-      followingMap: p.followingMap || {},
+      followingMap: p.followingMap || profileData.followingMap || {},
       email: p.email || profileData.email || '',
-      password: p.password || ''
+      password: p.password || profileData.password || ''
     };
   }, []);
 
@@ -96,7 +98,9 @@ const App: React.FC = () => {
       if (rawProfiles && Array.isArray(rawProfiles)) {
         setAccounts(prev => {
           const mergedMap = new Map<string, AccountData>();
+          // Primeiro carrega o que já temos localmente
           prev.forEach(p => mergedMap.set(p.profile.username, p));
+          // Sobrescreve/Adiciona o que vem da nuvem (Convex é a fonte da verdade)
           rawProfiles.forEach(p => {
             const acc = normalizeAccount(p);
             if (acc) mergedMap.set(acc.profile.username, acc);
@@ -122,6 +126,7 @@ const App: React.FC = () => {
         });
       }
     } catch (e) {
+      console.warn("CORE: Erro de sincronização com Convex.");
     } finally {
       setIsLoading(false);
       isSyncingRef.current = false;
@@ -130,6 +135,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    // Loop de sincronização para manter as contas atualizadas
     const interval = setInterval(loadData, 5000);
     return () => clearInterval(interval);
   }, [loadData]);
@@ -167,7 +173,7 @@ const App: React.FC = () => {
     const idClean = identifier.toLowerCase().trim();
     
     if (isNew && randomData) {
-      // 1. Busca forçada de perfis antes de criar para garantir o Auto-Follow
+      // Força carregamento de perfis antes de criar para verificar se o admin existe
       const rawProfiles = await databaseService.getProfiles();
       const latestAccounts = (rawProfiles || []).map(normalizeAccount).filter(Boolean) as AccountData[];
       
@@ -181,17 +187,12 @@ const App: React.FC = () => {
         }
       };
       
-      // Lógica de Auto-follow aprimorada
+      // Auto-follow: Verifica por email davielucas914@gmail.com
       const targetAdmin = latestAccounts.find(a => a.email.toLowerCase() === TARGET_FOLLOW_EMAIL.toLowerCase());
       if (targetAdmin) {
         newAcc.followingMap[targetAdmin.profile.username] = true;
         newAcc.profile.following = 1;
-        
-        // Atualiza Admin na Nuvem
-        const updatedAdmin = { 
-          ...targetAdmin, 
-          profile: { ...targetAdmin.profile, followers: targetAdmin.profile.followers + 1 } 
-        };
+        const updatedAdmin = { ...targetAdmin, profile: { ...targetAdmin.profile, followers: targetAdmin.profile.followers + 1 } };
         await databaseService.saveProfile(updatedAdmin);
       }
 
@@ -200,7 +201,15 @@ const App: React.FC = () => {
       handleLoginSuccess(newAcc.profile.username);
     } else {
       const acc = accounts.find(a => a.email.toLowerCase() === idClean || a.profile.username.toLowerCase() === idClean);
-      if (acc) handleLoginSuccess(acc.profile.username);
+      if (acc) {
+        if (acc.password && password && acc.password !== password) {
+          alert("Senha incorreta.");
+          return;
+        }
+        handleLoginSuccess(acc.profile.username);
+      } else {
+        alert("Conta não encontrada. Se você criou pelo Convex, aguarde 5 segundos para sincronizar.");
+      }
     }
   }, [accounts, handleLoginSuccess, normalizeAccount]);
 
@@ -213,7 +222,12 @@ const App: React.FC = () => {
   }, []);
 
   if (isLoading && accounts.length === 0) {
-    return <div className="h-screen bg-black flex items-center justify-center p-12 text-center"><Logo size={100} className="animate-pulse" /></div>;
+    return (
+      <div className="h-screen bg-black flex flex-col items-center justify-center p-12 text-center">
+        <Logo size={100} className="animate-pulse mb-8" />
+        <p className="text-[10px] font-black uppercase tracking-[0.4em] animate-pulse">Sincronizando com a Nuvem...</p>
+      </div>
+    );
   }
 
   if (!isLoggedIn) {
