@@ -92,8 +92,47 @@ const Profile: React.FC<ProfileProps> = ({
 
   const validate = (val: string) => /^[a-zA-Z0-9]{3,20}$/.test(val);
 
+  // Função para comprimir e redimensionar imagem antes do upload
+  const optimizeImage = (file: File): Promise<Blob> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          const maxSide = 400; // Tamanho ideal para avatar
+
+          if (width > height) {
+            if (width > maxSide) {
+              height *= maxSide / width;
+              width = maxSide;
+            }
+          } else {
+            if (height > maxSide) {
+              width *= maxSide / height;
+              height = maxSide;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          
+          canvas.toBlob((blob) => {
+            resolve(blob || file);
+          }, 'image/jpeg', 0.8); // 80% de qualidade JPEG
+        };
+        img.src = e.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
   const handleSaveProfile = async () => {
-    if (isUploadingPhoto) return; // Trava de segurança
+    if (isUploadingPhoto) return;
     
     setError('');
     setIsSaving(true);
@@ -115,9 +154,8 @@ const Profile: React.FC<ProfileProps> = ({
       return;
     }
 
-    // Se o avatar ainda for um blob e o upload falhou ou não terminou, avisar
     if (editForm.avatar?.startsWith('blob:')) {
-      setError('Aguarde o upload da foto terminar antes de salvar.');
+      setError('Aguarde a otimização da foto terminar.');
       setIsSaving(false);
       return;
     }
@@ -137,17 +175,20 @@ const Profile: React.FC<ProfileProps> = ({
       setIsUploadingPhoto(true);
       setError('');
       
-      // Feedback imediato (temporário)
+      // Preview imediato
       const tempUrl = URL.createObjectURL(file);
       setEditForm(prev => ({ ...prev, avatar: tempUrl }));
       
+      // Otimização (instantâneo no client)
+      const optimizedBlob = await optimizeImage(file);
+      
       const fileName = `avatar_${user.username}_${Date.now()}.jpg`;
-      const uploadedUrl = await databaseService.uploadFile('avatars', file, fileName);
+      const uploadedUrl = await databaseService.uploadFile('avatars', optimizedBlob, fileName);
       
       if (uploadedUrl) {
         setEditForm(prev => ({ ...prev, avatar: uploadedUrl }));
       } else {
-        setError('Falha ao enviar foto para a nuvem.');
+        setError('Erro ao enviar foto otimizada.');
       }
       setIsUploadingPhoto(false);
     }
@@ -241,7 +282,7 @@ const Profile: React.FC<ProfileProps> = ({
                     {editForm.avatar ? <img src={editForm.avatar} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center opacity-40">FOTO</div>}
                     
                     <div className={`absolute inset-0 bg-black/60 flex items-center justify-center transition-opacity text-[8px] font-black ${isUploadingPhoto ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                      {isUploadingPhoto ? 'ENVIANDO...' : 'TROCAR'}
+                      {isUploadingPhoto ? 'OTIMIZANDO...' : 'TROCAR'}
                     </div>
                     
                     {isUploadingPhoto && (
@@ -257,12 +298,12 @@ const Profile: React.FC<ProfileProps> = ({
               </div>
 
               <div className="space-y-2">
-                <label className="text-[8px] font-black text-gray-500 uppercase ml-1">Nome de Exibição</label>
+                <label className="text-[8px] font-black text-gray-600 uppercase ml-1">Nome de Exibição</label>
                 <input maxLength={20} type="text" disabled={!canChangeDisplayName} value={editForm.displayName} onChange={e => setEditForm({...editForm, displayName: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm outline-none disabled:opacity-30" />
               </div>
 
               <div className="space-y-2">
-                <label className="text-[8px] font-black text-gray-500 uppercase ml-1">Bio</label>
+                <label className="text-[8px] font-black text-gray-600 uppercase ml-1">Bio</label>
                 <textarea maxLength={200} value={editForm.bio} onChange={e => setEditForm({...editForm, bio: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm outline-none h-32 resize-none" />
               </div>
             </div>
