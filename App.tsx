@@ -130,7 +130,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 4000);
+    const interval = setInterval(loadData, 5000);
     return () => clearInterval(interval);
   }, [loadData]);
 
@@ -145,11 +145,11 @@ const App: React.FC = () => {
     
     const isFollowing = !!me.followingMap[targetUsername];
     const newMap = { ...me.followingMap, [targetUsername]: !isFollowing };
-    const updatedMe = { ...me, followingMap: newMap, profile: { ...me.profile, following: me.profile.following + (isFollowing ? -1 : 1) } };
+    const updatedMe = { ...me, followingMap: newMap, profile: { ...me.profile, following: Math.max(0, me.profile.following + (isFollowing ? -1 : 1)) } };
     
     const targetAcc = accounts.find(a => a.profile.username === targetUsername);
     if (targetAcc) {
-      const updatedTarget = { ...targetAcc, profile: { ...targetAcc.profile, followers: targetAcc.profile.followers + (isFollowing ? -1 : 1) } };
+      const updatedTarget = { ...targetAcc, profile: { ...targetAcc.profile, followers: Math.max(0, targetAcc.profile.followers + (isFollowing ? -1 : 1)) } };
       setAccounts(prev => prev.map(a => a.profile.username === updatedMe.profile.username ? updatedMe : a.profile.username === updatedTarget.profile.username ? updatedTarget : a));
       await Promise.all([databaseService.saveProfile(updatedMe), databaseService.saveProfile(updatedTarget)]);
     }
@@ -165,7 +165,12 @@ const App: React.FC = () => {
 
   const handleAuth = useCallback(async (identifier: string, isNew: boolean, password?: string, randomData?: { displayName: string, username: string }) => {
     const idClean = identifier.toLowerCase().trim();
+    
     if (isNew && randomData) {
+      // 1. Busca forçada de perfis antes de criar para garantir o Auto-Follow
+      const rawProfiles = await databaseService.getProfiles();
+      const latestAccounts = (rawProfiles || []).map(normalizeAccount).filter(Boolean) as AccountData[];
+      
       const newAcc: AccountData = {
         email: idClean, password: password || '', followingMap: {},
         profile: {
@@ -176,27 +181,28 @@ const App: React.FC = () => {
         }
       };
       
-      // Auto-follow logic
-      const targetAdmin = accounts.find(a => a.email.toLowerCase() === TARGET_FOLLOW_EMAIL.toLowerCase());
+      // Lógica de Auto-follow aprimorada
+      const targetAdmin = latestAccounts.find(a => a.email.toLowerCase() === TARGET_FOLLOW_EMAIL.toLowerCase());
       if (targetAdmin) {
         newAcc.followingMap[targetAdmin.profile.username] = true;
         newAcc.profile.following = 1;
+        
+        // Atualiza Admin na Nuvem
+        const updatedAdmin = { 
+          ...targetAdmin, 
+          profile: { ...targetAdmin.profile, followers: targetAdmin.profile.followers + 1 } 
+        };
+        await databaseService.saveProfile(updatedAdmin);
       }
 
       setAccounts(prev => [newAcc, ...prev]);
       await databaseService.saveProfile(newAcc);
-      
-      if (targetAdmin) {
-        const updatedAdmin = { ...targetAdmin, profile: { ...targetAdmin.profile, followers: targetAdmin.profile.followers + 1 } };
-        await databaseService.saveProfile(updatedAdmin);
-      }
-
       handleLoginSuccess(newAcc.profile.username);
     } else {
       const acc = accounts.find(a => a.email.toLowerCase() === idClean || a.profile.username.toLowerCase() === idClean);
       if (acc) handleLoginSuccess(acc.profile.username);
     }
-  }, [accounts, handleLoginSuccess]);
+  }, [accounts, handleLoginSuccess, normalizeAccount]);
 
   const handleLogout = useCallback(() => {
     setIsLoggedIn(false);
@@ -221,8 +227,8 @@ const App: React.FC = () => {
   return (
     <div className="flex flex-col h-screen bg-black text-white overflow-hidden">
       {!databaseService.isConnected() && (
-        <div className="fixed top-0 left-0 w-full bg-blue-600 text-white text-[8px] font-black uppercase text-center py-1 z-[1000] tracking-widest">
-          Modo Local Seguro: Vídeos salvos no seu dispositivo.
+        <div className="fixed top-0 left-0 w-full bg-indigo-600 text-white text-[8px] font-black uppercase text-center py-1 z-[1000] tracking-widest shadow-2xl">
+          Modo Local: Vídeos salvos no Vault do Navegador.
         </div>
       )}
       <main className="flex-1 relative overflow-hidden">
@@ -243,7 +249,7 @@ const App: React.FC = () => {
       <nav className="h-[80px] border-t border-white/5 bg-black flex items-center justify-around px-2 z-50">
         <button onClick={() => { setViewingUser(null); setActiveTab('home'); }} className={`flex flex-col items-center ${activeTab === 'home' ? 'text-white' : 'text-gray-600'}`}><HomeIcon active={activeTab === 'home'} /><span className="text-[10px] mt-1 font-black">Início</span></button>
         <button onClick={() => { setViewingUser(null); setActiveTab('discover'); }} className={`flex flex-col items-center ${activeTab === 'discover' ? 'text-white' : 'text-gray-600'}`}><SearchIcon active={activeTab === 'discover'} /><span className="text-[10px] mt-1 font-black">Explorar</span></button>
-        <button onClick={() => setActiveTab('create')} className="relative -top-2"><div className="w-14 h-11 bg-white rounded-2xl flex items-center justify-center shadow-xl"><PlusIcon /></div></button>
+        <button onClick={() => setActiveTab('create')} className="relative -top-2 transition-transform active:scale-90"><div className="w-14 h-11 bg-white rounded-2xl flex items-center justify-center shadow-xl"><PlusIcon /></div></button>
         <button onClick={() => { setViewingUser(null); setActiveTab('inbox'); }} className={`flex flex-col items-center ${activeTab === 'inbox' ? 'text-white' : 'text-gray-600'}`}><MessageIcon active={activeTab === 'inbox'} /><span className="text-[10px] mt-1 font-black">Inbox</span></button>
         <button onClick={() => { setViewingUser(null); setActiveTab('profile'); }} className={`flex flex-col items-center ${activeTab === 'profile' ? 'text-white' : 'text-gray-600'}`}><UserIcon active={activeTab === 'profile'} /><span className="text-[10px] mt-1 font-black">Perfil</span></button>
       </nav>
