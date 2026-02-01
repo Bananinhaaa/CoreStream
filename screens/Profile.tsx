@@ -89,14 +89,14 @@ const Profile: React.FC<ProfileProps> = ({
         const img = new Image();
         img.onload = () => {
           const canvas = document.createElement('canvas');
-          const max = 400;
+          const max = 300; // Reduzi para 300px para ser ainda mais leve em Base64
           let w = img.width;
           let h = img.height;
           if (w > h) { if (w > max) { h *= max/w; w = max; } }
           else { if (h > max) { w *= max/h; h = max; } }
           canvas.width = w; canvas.height = h;
           canvas.getContext('2d')?.drawImage(img, 0, 0, w, h);
-          canvas.toBlob(b => resolve(b || file), 'image/jpeg', 0.8);
+          canvas.toBlob(b => resolve(b || file), 'image/jpeg', 0.7); // 70% de qualidade
         };
         img.src = e.target?.result as string;
       };
@@ -111,19 +111,22 @@ const Profile: React.FC<ProfileProps> = ({
     setIsUploadingPhoto(true);
     setError('');
     
-    // Preview Instantâneo (UX)
-    const previewUrl = URL.createObjectURL(file);
-    setEditForm(prev => ({ ...prev, avatar: previewUrl }));
-
     try {
+      // Preview Instantâneo usando Blob local
+      const previewUrl = URL.createObjectURL(file);
+      setEditForm(prev => ({ ...prev, avatar: previewUrl }));
+
       const optimized = await optimizeImage(file);
       const fileName = `avatar_${user.username}_${Date.now()}.jpg`;
-      const cloudUrl = await databaseService.uploadFile('avatars', optimized, fileName);
       
-      if (cloudUrl) {
-        setEditForm(prev => ({ ...prev, avatar: cloudUrl }));
+      // O databaseService retornará Base64 se estiver offline, salvando permanentemente
+      const finalUrl = await databaseService.uploadFile('avatars', optimized, fileName);
+      
+      if (finalUrl) {
+        setEditForm(prev => ({ ...prev, avatar: finalUrl }));
       }
     } catch (err) {
+      console.error(err);
       setError('Erro ao processar imagem.');
     } finally {
       setIsUploadingPhoto(false);
@@ -135,13 +138,7 @@ const Profile: React.FC<ProfileProps> = ({
     setIsSaving(true);
     setError('');
 
-    const isCloud = databaseService.isConnected();
-    if (isCloud && editForm.avatar?.startsWith('blob:')) {
-      setError('Aguarde a sincronização da foto...');
-      setIsSaving(false);
-      return;
-    }
-
+    // Permite salvar se for blob ou base64
     const updates: any = { ...editForm };
     if (editForm.username !== user.username) updates.lastUsernameChange = Date.now();
     if (editForm.displayName !== user.displayName) updates.lastDisplayNameChange = Date.now();

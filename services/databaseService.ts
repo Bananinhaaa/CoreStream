@@ -5,6 +5,16 @@ import { INITIAL_VIDEOS } from '../constants';
 const convexUrl = (import.meta as any).env?.VITE_CONVEX_URL || '';
 const isConfigured = !!convexUrl && convexUrl !== 'undefined' && convexUrl.includes('.cloud');
 
+// Função auxiliar para converter Blob em Base64 para persistência local
+const blobToBase64 = (blob: Blob): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+};
+
 export const databaseService = {
   getConvexUrl(): string {
     return convexUrl;
@@ -15,17 +25,22 @@ export const databaseService = {
   },
 
   async uploadFile(bucket: 'videos' | 'avatars', file: File | Blob, path: string): Promise<string | null> {
+    // Se não estiver configurado ou for um avatar pequeno, usamos Base64 para persistência real no LocalStorage
     if (!isConfigured) {
+      if (bucket === 'avatars') {
+        console.log("CORE: Convertendo avatar para Base64 (Persistência Local)");
+        return await blobToBase64(file);
+      }
       return URL.createObjectURL(file);
     }
     
     try {
-      // 1. Gera URL de upload
+      // 1. Gera URL de upload no Convex
       const response = await fetch(`${convexUrl}/api/mutation/media/generateUploadUrl`, { method: "POST" });
       if (!response.ok) throw new Error("Upload URL failed");
       const { value: uploadUrl } = await response.json();
       
-      // 2. Upload binário
+      // 2. Upload binário para o Storage do Convex
       const result = await fetch(uploadUrl, { method: "POST", body: file });
       if (!result.ok) throw new Error("File upload failed");
       const { storageId } = await result.json();
@@ -42,7 +57,8 @@ export const databaseService = {
       return url;
     } catch (e) { 
       console.error("Cloud Upload Error:", e);
-      return URL.createObjectURL(file); 
+      // Se falhar o cloud, retorna Base64 como fallback para não perder a foto do usuário
+      return await blobToBase64(file); 
     }
   },
 
