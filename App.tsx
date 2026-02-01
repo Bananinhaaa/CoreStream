@@ -37,13 +37,24 @@ const App: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(() => localStorage.getItem(SESSION_KEY) === 'true');
   
   const [accounts, setAccounts] = useState<AccountData[]>(() => {
-    const local = localStorage.getItem('CORE_PROFILES');
-    return local ? JSON.parse(local) : [];
+    try {
+      const local = localStorage.getItem('CORE_PROFILES');
+      if (!local) return [];
+      const parsed = JSON.parse(local);
+      // Sanitização básica para garantir que o formato está correto
+      return Array.isArray(parsed) ? parsed.filter(a => a && a.profile && a.profile.username) : [];
+    } catch (e) {
+      return [];
+    }
   });
   
   const [videos, setVideos] = useState<Video[]>(() => {
-    const local = localStorage.getItem('CORE_VIDEOS');
-    return local ? JSON.parse(local) : INITIAL_VIDEOS;
+    try {
+      const local = localStorage.getItem('CORE_VIDEOS');
+      return local ? JSON.parse(local) : INITIAL_VIDEOS;
+    } catch (e) {
+      return INITIAL_VIDEOS;
+    }
   });
 
   const [currentUsername, setCurrentUsername] = useState<string | null>(() => localStorage.getItem(ACTIVE_USER_KEY));
@@ -63,24 +74,29 @@ const App: React.FC = () => {
         setAccounts(prev => {
           const remoteMap = new Map();
           rawProfiles.forEach((p: any) => {
+            // Normalização agressiva para garantir compatibilidade entre versões
+            const username = p.username || (p.profile && p.profile.username);
+            if (!username) return;
+
             const profile: UserProfile = {
-              username: p.username,
-              displayName: p.displayName || p.username,
-              bio: p.bio || '',
-              avatar: p.avatar || '',
-              email: p.email || '',
-              followers: p.followers || 0,
-              following: p.following || 0,
-              likes: p.likes || 0,
-              isVerified: p.isVerified || false,
-              isAdmin: p.isAdmin || false,
-              isBanned: p.isBanned || false,
-              profileColor: p.profileColor || '#000000',
-              repostedVideoIds: p.repostedVideoIds || [],
-              notifications: p.notifications || [],
-              lastSeen: p.lastSeen || Date.now()
+              username: username,
+              displayName: p.displayName || (p.profile && p.profile.displayName) || username,
+              bio: p.bio || (p.profile && p.profile.bio) || '',
+              avatar: p.avatar || (p.profile && p.profile.avatar) || '',
+              email: p.email || (p.profile && p.profile.email) || '',
+              followers: p.followers || (p.profile && p.profile.followers) || 0,
+              following: p.following || (p.profile && p.profile.following) || 0,
+              likes: p.likes || (p.profile && p.profile.likes) || 0,
+              isVerified: !!(p.isVerified || (p.profile && p.profile.isVerified)),
+              isAdmin: !!(p.isAdmin || (p.profile && p.profile.isAdmin)),
+              isBanned: !!(p.isBanned || (p.profile && p.profile.isBanned)),
+              profileColor: p.profileColor || (p.profile && p.profile.profileColor) || '#000000',
+              repostedVideoIds: p.repostedVideoIds || (p.profile && p.profile.repostedVideoIds) || [],
+              notifications: p.notifications || (p.profile && p.profile.notifications) || [],
+              lastSeen: p.lastSeen || (p.profile && p.profile.lastSeen) || Date.now()
             };
-            remoteMap.set(p.username, {
+            
+            remoteMap.set(username, {
               profile,
               followingMap: p.followingMap || {},
               email: p.email || '',
@@ -88,7 +104,7 @@ const App: React.FC = () => {
             });
           });
 
-          // Fazemos o merge: Mantemos contas locais que não estão no servidor ainda (evita sumir no login)
+          // Merge: Preservar contas locais que ainda não subiram pra nuvem
           const localOnly = prev.filter(a => !remoteMap.has(a.profile.username));
           const merged = [...Array.from(remoteMap.values()), ...localOnly];
           
@@ -121,29 +137,40 @@ const App: React.FC = () => {
     return () => clearInterval(syncInterval);
   }, [loadData]);
 
-  useEffect(() => {
-    if (isLoggedIn && currentUsername) {
-      databaseService.updatePresence(currentUsername);
-    }
-  }, [isLoggedIn, currentUsername]);
-
   const activeAccount = useMemo(() => {
     if (!currentUsername || accounts.length === 0) return null;
     const acc = accounts.find(a => a.profile.username === currentUsername);
-    if (acc && acc.email.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase()) {
-      acc.profile.isAdmin = true;
-      acc.profile.isVerified = true;
+    if (acc) {
+      const isMaster = acc.email.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase();
+      if (isMaster) {
+        acc.profile.isAdmin = true;
+        acc.profile.isVerified = true;
+      }
     }
-    return acc;
+    return acc || null;
   }, [accounts, currentUsername]);
 
-  // Se estamos logados mas a conta "sumiu" da lista, tentamos carregar dados de novo
+  const handleLogout = useCallback(() => {
+    setIsLoggedIn(false);
+    setCurrentUsername(null);
+    localStorage.setItem(SESSION_KEY, 'false');
+    localStorage.removeItem(ACTIVE_USER_KEY);
+    setActiveTab('home');
+  }, []);
+
+  // MECANISMO DE AUTO-CURA:
+  // Se estiver logado, mas não encontrar o perfil após carregar, força logout para evitar tela infinita.
   useEffect(() => {
-    if (isLoggedIn && currentUsername && !activeAccount && !isLoading) {
-      console.warn("CORE: Conta ativa não encontrada na lista. Forçando reload...");
-      loadData();
+    if (isLoggedIn && isDataReady && !isLoading && !activeAccount) {
+      console.warn("CORE HEAL: Sessão órfã detectada. Resetando...");
+      // Se tivermos o username, mas não na lista, pode ser um erro de cache.
+      // Damos uma chance de 3 segundos antes de deslogar.
+      const timer = setTimeout(() => {
+        if (!activeAccount) handleLogout();
+      }, 3000);
+      return () => clearTimeout(timer);
     }
-  }, [isLoggedIn, currentUsername, activeAccount, isLoading, loadData]);
+  }, [isLoggedIn, isDataReady, isLoading, activeAccount, handleLogout]);
 
   const handleUpdateAccountStats = useCallback(async (username: string, stats: any) => {
     setAccounts(prev => {
@@ -189,26 +216,18 @@ const App: React.FC = () => {
   }, [videos, handleUpdateVideoStats]);
 
   const handleLoginSuccess = (username: string) => {
+    localStorage.setItem(ACTIVE_USER_KEY, username);
+    localStorage.setItem(SESSION_KEY, 'true');
     setCurrentUsername(username);
     setIsLoggedIn(true);
-    localStorage.setItem(SESSION_KEY, 'true');
-    localStorage.setItem(ACTIVE_USER_KEY, username);
-  };
-
-  const handleLogout = () => {
-    setIsLoggedIn(false);
-    setCurrentUsername(null);
-    localStorage.setItem(SESSION_KEY, 'false');
-    localStorage.removeItem(ACTIVE_USER_KEY);
-    setActiveTab('home');
   };
 
   if (isLoading && !isDataReady && accounts.length === 0) {
     return (
-      <div className="h-screen bg-black flex flex-col items-center justify-center p-12 text-center">
+      <div className="h-screen bg-black flex flex-col items-center justify-center p-12 text-center animate-view">
         <Logo size={100} className="mb-12 animate-pulse" />
         <h2 className="text-xl font-black italic uppercase tracking-tighter mb-2">CORE CLOUD</h2>
-        <p className="text-[10px] font-black uppercase tracking-[0.4em] text-white/40">Iniciando Protocolos...</p>
+        <p className="text-[10px] font-black uppercase tracking-[0.4em] text-white/40">Conectando ao Terminal...</p>
       </div>
     );
   }
@@ -233,6 +252,7 @@ const App: React.FC = () => {
                 isBanned: false, profileColor: '#000000', lastSeen: Date.now()
               } 
             };
+            // Atualizamos o estado primeiro para o useMemo pegar no handleLoginSuccess
             setAccounts(prev => [...prev, newAcc]);
             handleLoginSuccess(newAcc.profile.username);
             await databaseService.saveProfile(newAcc);
@@ -246,18 +266,17 @@ const App: React.FC = () => {
     );
   }
 
-  // Tela de "Conectando" agora tem um botão de emergência caso a sincronização trave
   if (!activeAccount) {
     return (
       <div className="h-screen bg-black flex flex-col items-center justify-center p-12 text-center animate-view">
         <Logo size={60} className="mb-8 opacity-20 animate-pulse" />
-        <h2 className="text-sm font-black italic uppercase tracking-widest mb-2">Sincronizando...</h2>
+        <h2 className="text-sm font-black italic uppercase tracking-widest mb-2">Recuperando Perfil...</h2>
         <p className="text-[9px] font-bold uppercase text-gray-500 max-w-xs leading-relaxed">
-          Buscando seus dados na Core Cloud. Se demorar muito, tente reiniciar.
+          O sistema está sincronizando sua identidade digital com a Core Cloud.
         </p>
         <div className="mt-16 space-y-4">
-          <button onClick={() => loadData()} className="text-[9px] font-black uppercase tracking-widest text-indigo-400 block mx-auto">Tentar Novamente</button>
-          <button onClick={handleLogout} className="text-[9px] font-black uppercase tracking-widest text-white/20 block mx-auto">Reiniciar Sessão</button>
+          <button onClick={() => loadData()} className="text-[9px] font-black uppercase tracking-widest text-indigo-400 block mx-auto py-2 px-4 bg-white/5 rounded-xl">Forçar Sincronia</button>
+          <button onClick={handleLogout} className="text-[9px] font-black uppercase tracking-widest text-rose-500/60 block mx-auto">Sair da Sessão</button>
         </div>
       </div>
     );
