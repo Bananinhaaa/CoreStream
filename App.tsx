@@ -28,6 +28,7 @@ const MASTER_ADMIN_EMAIL = 'davielucas914@gmail.com';
 const SESSION_KEY = 'CORE_SESSION_ACTIVE';
 const ACTIVE_USER_KEY = 'CORE_ACTIVE_USERNAME';
 const PROFILES_STORAGE_KEY = 'CORE_PROFILES_V3';
+const VIDEOS_STORAGE_KEY = 'CORE_VIDEOS';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('home');
@@ -45,7 +46,7 @@ const App: React.FC = () => {
   
   const [videos, setVideos] = useState<Video[]>(() => {
     try {
-      const local = localStorage.getItem('CORE_VIDEOS');
+      const local = localStorage.getItem(VIDEOS_STORAGE_KEY);
       return local ? JSON.parse(local) : INITIAL_VIDEOS;
     } catch (e) { return INITIAL_VIDEOS; }
   });
@@ -87,7 +88,7 @@ const App: React.FC = () => {
     isSyncingRef.current = true;
 
     try {
-      const [globalVideos, rawProfiles] = await Promise.all([
+      const [remoteVideos, rawProfiles] = await Promise.all([
         databaseService.getVideos(),
         databaseService.getProfiles()
       ]);
@@ -99,20 +100,30 @@ const App: React.FC = () => {
             const acc = normalizeAccount(p);
             if (acc) remoteMap.set(acc.profile.username, acc);
           });
-          const merged = Array.from(remoteMap.values());
-          prev.forEach(localAcc => {
-            if (!remoteMap.has(localAcc.profile.username) && localAcc.profile.username === currentUsername) {
-              merged.push(localAcc);
-            }
-          });
-          localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(merged));
-          return merged;
+          
+          // Manter contas locais (como a logada) mesmo que o servidor atrase
+          const mergedMap = new Map<string, AccountData>();
+          prev.forEach(p => mergedMap.set(p.profile.username, p));
+          remoteMap.forEach((p, k) => mergedMap.set(k, p));
+
+          const result = Array.from(mergedMap.values());
+          localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(result));
+          return result;
         });
       }
 
-      if (globalVideos && Array.isArray(globalVideos)) {
-        setVideos(globalVideos);
-        localStorage.setItem('CORE_VIDEOS', JSON.stringify(globalVideos));
+      if (remoteVideos && Array.isArray(remoteVideos)) {
+        setVideos(prev => {
+          const vMap = new Map<string, Video>();
+          // Vídeos locais têm precedência (se acabaram de ser criados)
+          prev.forEach(v => vMap.set(v.id, v));
+          // Vídeos remotos atualizam o feed
+          remoteVideos.forEach(v => vMap.set(v.id, v));
+          
+          const sorted = Array.from(vMap.values()).sort((a, b) => Number(b.id.split('_')[1] || b.id) - Number(a.id.split('_')[1] || a.id));
+          localStorage.setItem(VIDEOS_STORAGE_KEY, JSON.stringify(sorted));
+          return sorted;
+        });
       }
     } catch (e) {
       console.warn("CORE: Sincronização offline.");
@@ -120,19 +131,20 @@ const App: React.FC = () => {
       setIsLoading(false);
       isSyncingRef.current = false;
     }
-  }, [currentUsername, normalizeAccount]);
+  }, [normalizeAccount]);
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 8000);
+    const interval = setInterval(loadData, 5000); // Mais rápido para ver novos usuários
     return () => clearInterval(interval);
   }, [loadData]);
 
   useEffect(() => {
     if (currentUsername && isLoggedIn) {
+      databaseService.updatePresence(currentUsername);
       const pInterval = setInterval(() => {
         databaseService.updatePresence(currentUsername);
-      }, 30000);
+      }, 10000); // Pulso mais frequente
       return () => clearInterval(pInterval);
     }
   }, [currentUsername, isLoggedIn]);

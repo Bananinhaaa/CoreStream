@@ -20,34 +20,29 @@ const Discover: React.FC<DiscoverProps> = ({ videos, onNavigateToProfile, curren
   }, []);
 
   const onlineUsers = useMemo(() => {
-    const FIVE_MINUTES = 5 * 60 * 1000;
+    const TWO_MINUTES = 2 * 60 * 1000;
     const now = Date.now();
     return allAccounts
-      .filter(acc => acc.profile.username !== currentUser.username) // Não mostrar a si mesmo
-      .filter(acc => acc.profile.lastSeen && (now - acc.profile.lastSeen) < FIVE_MINUTES)
+      .filter(acc => acc.profile.username !== currentUser.username)
+      .filter(acc => acc.profile.lastSeen && (now - acc.profile.lastSeen) < TWO_MINUTES)
       .map(acc => acc.profile);
   }, [allAccounts, currentUser.username]);
 
-  const filteredVideos = useMemo(() => {
-    if (!searchTerm.trim()) return videos;
-    const term = searchTerm.toLowerCase();
-    return videos.filter(v => 
-      v.description.toLowerCase().includes(term) || 
-      v.username.toLowerCase().includes(term)
-    );
-  }, [searchTerm, videos]);
-
   const filteredUsers = useMemo(() => {
-    if (!searchTerm.trim()) return allAccounts;
-    const term = searchTerm.toLowerCase();
+    const term = searchTerm.toLowerCase().trim();
+    if (!term) return allAccounts;
     return allAccounts.filter(acc => 
       acc.profile.username.toLowerCase().includes(term) || 
       acc.profile.displayName.toLowerCase().includes(term)
     );
   }, [searchTerm, allAccounts]);
 
+  const sortedUsers = useMemo(() => {
+    return [...filteredUsers].sort((a, b) => (b.profile.followers || 0) - (a.profile.followers || 0));
+  }, [filteredUsers]);
+
   return (
-    <div className="h-full animate-view overflow-y-auto no-scrollbar pb-24 bg-black">
+    <div className="h-full animate-view overflow-y-auto no-scrollbar pb-32 bg-black">
       <header className="p-8 pb-6 sticky top-0 bg-black/95 backdrop-blur-2xl z-50 border-b border-white/5">
         <h2 className="text-3xl font-black mb-6 tracking-tighter italic uppercase">Explore</h2>
         <div className="relative">
@@ -81,7 +76,7 @@ const Discover: React.FC<DiscoverProps> = ({ videos, onNavigateToProfile, curren
                     className="flex flex-col items-center gap-2 shrink-0 cursor-pointer group"
                   >
                     <div className="relative">
-                      <div className="w-14 h-14 rounded-2xl bg-zinc-900 border border-white/10 p-0.5 group-active:scale-90 transition-transform">
+                      <div className="w-14 h-14 rounded-2xl bg-zinc-900 border border-white/10 p-0.5 group-active:scale-90 transition-transform overflow-hidden">
                         {user.avatar ? (
                           <img src={user.avatar} className="w-full h-full object-cover rounded-[0.8rem]" />
                         ) : (
@@ -111,8 +106,8 @@ const Discover: React.FC<DiscoverProps> = ({ videos, onNavigateToProfile, curren
                     rel="noopener noreferrer"
                     className="min-w-[240px] bg-white/5 border border-white/5 p-5 rounded-[2rem] hover:bg-indigo-600/10 transition-all group"
                   >
-                    <p className="text-[9px] font-black text-gray-500 uppercase mb-2 group-hover:text-indigo-400 transition-colors">{chunk.web?.title || 'Notícia Tech'}</p>
-                    <p className="text-xs font-medium text-white line-clamp-2 italic">Acompanhe as últimas novidades no CoreStream</p>
+                    <p className="text-[9px] font-black text-gray-500 uppercase mb-2 group-hover:text-indigo-400 transition-colors truncate">{chunk.web?.title || 'Notícia Tech'}</p>
+                    <p className="text-xs font-medium text-white line-clamp-2 italic">Acompanhe no CoreStream</p>
                   </a>
                 ))}
              </div>
@@ -121,11 +116,11 @@ const Discover: React.FC<DiscoverProps> = ({ videos, onNavigateToProfile, curren
 
         <section>
           <div className="flex items-center justify-between mb-6 px-1">
-            <h3 className="text-[10px] font-black uppercase text-white tracking-[0.4em]">Todos os Scripters</h3>
-            <span className="text-[9px] font-black text-gray-600 uppercase tracking-widest">{filteredUsers.length}</span>
+            <h3 className="text-[10px] font-black uppercase text-white tracking-[0.4em]">Comunidade</h3>
+            <span className="text-[9px] font-black text-gray-600 uppercase tracking-widest">{sortedUsers.length}</span>
           </div>
           <div className="grid grid-cols-4 gap-x-4 gap-y-8">
-            {filteredUsers.map(acc => (
+            {sortedUsers.map(acc => (
               <div 
                 key={acc.profile.username} 
                 onClick={() => onNavigateToProfile(acc.profile.username)} 
@@ -136,6 +131,9 @@ const Discover: React.FC<DiscoverProps> = ({ videos, onNavigateToProfile, curren
                     <img src={acc.profile.avatar} className="w-full h-full object-cover" />
                   ) : (
                     <span className="font-black text-xl text-white/20">{acc.profile.username.charAt(0).toUpperCase()}</span>
+                  )}
+                  {acc.profile.lastSeen && (Date.now() - acc.profile.lastSeen < 120000) && (
+                    <div className="absolute top-1 right-1 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-zinc-900"></div>
                   )}
                 </div>
                 <div className="flex flex-col items-center w-full px-1 overflow-hidden text-center">

@@ -50,50 +50,57 @@ const Create: React.FC<CreateProps> = ({ onAddVideo, currentUser, allAccounts = 
     if (!videoUrl || !description || isPosting) return;
     setIsPosting(true);
 
-    let finalVideoUrl = videoUrl;
+    try {
+      let finalVideoUrl = videoUrl;
 
-    // Se houver um arquivo real (Upload manual), envia para o Storage
-    if (videoFile) {
-      const fileName = `${currentUser.username}_${Date.now()}.mp4`;
-      const uploadedUrl = await databaseService.uploadFile('videos', videoFile, fileName);
-      if (uploadedUrl) finalVideoUrl = uploadedUrl;
-    } 
-    // Se for vídeo de IA, tentamos converter o Blob URL em arquivo real para o storage
-    else if (videoUrl.startsWith('blob:')) {
-      try {
-        const response = await fetch(videoUrl);
-        const blob = await response.blob();
-        const fileName = `ai_${currentUser.username}_${Date.now()}.mp4`;
-        const uploadedUrl = await databaseService.uploadFile('videos', blob, fileName);
+      // 1. Upload para o Storage (Nuvem)
+      if (videoFile) {
+        const fileName = `${currentUser.username}_${Date.now()}.mp4`;
+        const uploadedUrl = await databaseService.uploadFile('videos', videoFile, fileName);
         if (uploadedUrl) finalVideoUrl = uploadedUrl;
-      } catch (e) {
-        console.warn("Falha ao persistir vídeo de IA no storage, usando local.");
+      } 
+      else if (videoUrl.startsWith('blob:')) {
+        try {
+          const response = await fetch(videoUrl);
+          const blob = await response.blob();
+          const fileName = `ai_${currentUser.username}_${Date.now()}.mp4`;
+          const uploadedUrl = await databaseService.uploadFile('videos', blob, fileName);
+          if (uploadedUrl) finalVideoUrl = uploadedUrl;
+        } catch (e) {
+          console.warn("CORE: Falha ao subir vídeo de IA, usando URL temporária.");
+        }
       }
+      
+      const newVideo: Video = {
+        id: `vid_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        url: finalVideoUrl,
+        username: currentUser.username,
+        displayName: currentUser.displayName,
+        avatar: currentUser.avatar || '',
+        description,
+        likes: 0,
+        comments: [],
+        reposts: 0,
+        views: 0,
+        isLiked: false,
+        isFollowing: true,
+        music: `Som Original - ${currentUser.displayName}`,
+        isVerified: !!currentUser.isVerified,
+        commentsDisabled: false
+      };
+      
+      // 2. Salvar metadados no Banco de Dados
+      await databaseService.saveVideo(newVideo);
+      
+      onAddVideo(newVideo);
+      setVideoUrl('');
+      setVideoFile(null);
+      setDescription('');
+    } catch (err) {
+      alert("Erro ao publicar vídeo. Verifique sua conexão com a nuvem.");
+    } finally {
+      setIsPosting(false);
     }
-    
-    const newVideo: Video = {
-      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-      url: finalVideoUrl,
-      username: currentUser.username,
-      displayName: currentUser.displayName,
-      avatar: currentUser.avatar || '',
-      description,
-      likes: 0,
-      comments: [],
-      reposts: 0,
-      views: 0,
-      isLiked: false,
-      isFollowing: true,
-      music: `Original - ${currentUser.displayName}`,
-      isVerified: !!currentUser.isVerified,
-      commentsDisabled: false
-    };
-    
-    onAddVideo(newVideo);
-    setIsPosting(false);
-    setVideoUrl('');
-    setVideoFile(null);
-    setDescription('');
   };
 
   const handleSelectMention = (username: string) => {
@@ -128,7 +135,7 @@ const Create: React.FC<CreateProps> = ({ onAddVideo, currentUser, allAccounts = 
   }
 
   return (
-    <div className="h-full animate-view bg-black flex flex-col overflow-hidden pb-24 px-6">
+    <div className="h-full animate-view bg-black flex flex-col overflow-hidden pb-32 px-6">
       <div className="flex justify-center pt-8 pb-4">
         <div className="bg-white/5 p-1.5 rounded-2xl flex gap-1 border border-white/5">
            <button onClick={() => setMode('upload')} className={`px-5 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${mode === 'upload' ? 'bg-white text-black' : 'text-gray-600'}`}>Upload</button>
@@ -182,7 +189,7 @@ const Create: React.FC<CreateProps> = ({ onAddVideo, currentUser, allAccounts = 
                 disabled={!videoUrl || isPosting} 
                 className="w-full bg-white text-black font-black py-5 rounded-[2rem] text-[10px] uppercase tracking-[0.2em] shadow-xl active:scale-95 transition-all disabled:opacity-30"
               >
-                {isPosting ? 'Sincronizando Mídia...' : 'Publicar Agora'}
+                {isPosting ? 'Publicando na Nuvem...' : 'Publicar Agora'}
               </button>
             </>
           )}
