@@ -21,14 +21,20 @@ export const databaseService = {
   },
 
   async uploadFile(bucket: 'videos' | 'avatars', file: File | Blob, path: string): Promise<string | null> {
-    if (!isConfigured) return URL.createObjectURL(file);
+    if (!isConfigured) {
+      console.log("CORE: Salvando arquivo localmente (modo offline).");
+      return URL.createObjectURL(file);
+    }
+    
     try {
       // 1. Gera URL de upload
       const response = await fetch(`${convexUrl}/api/mutation/media/generateUploadUrl`, { method: "POST" });
+      if (!response.ok) throw new Error("Falha ao gerar URL de upload");
       const { value: uploadUrl } = await response.json();
       
       // 2. Faz o upload do arquivo real
       const result = await fetch(uploadUrl, { method: "POST", body: file });
+      if (!result.ok) throw new Error("Falha no upload do arquivo");
       const { storageId } = await result.json();
       
       // 3. Pega a URL pública permanente
@@ -37,10 +43,13 @@ export const databaseService = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ args: { storageId } })
       });
+      if (!getUrlResponse.ok) throw new Error("Falha ao obter URL pública");
       const { value: url } = await getUrlResponse.json();
+      
       return url;
     } catch (e) { 
       console.error("Erro no upload para Cloud:", e);
+      // Fallback para blob local para não travar a experiência do usuário
       return URL.createObjectURL(file); 
     }
   },

@@ -92,7 +92,6 @@ const Profile: React.FC<ProfileProps> = ({
 
   const validate = (val: string) => /^[a-zA-Z0-9]{3,20}$/.test(val);
 
-  // Função para comprimir e redimensionar imagem antes do upload
   const optimizeImage = (file: File): Promise<Blob> => {
     return new Promise((resolve) => {
       const reader = new FileReader();
@@ -102,7 +101,7 @@ const Profile: React.FC<ProfileProps> = ({
           const canvas = document.createElement('canvas');
           let width = img.width;
           let height = img.height;
-          const maxSide = 400; // Tamanho ideal para avatar
+          const maxSide = 400;
 
           if (width > height) {
             if (width > maxSide) {
@@ -123,7 +122,7 @@ const Profile: React.FC<ProfileProps> = ({
           
           canvas.toBlob((blob) => {
             resolve(blob || file);
-          }, 'image/jpeg', 0.8); // 80% de qualidade JPEG
+          }, 'image/jpeg', 0.8);
         };
         img.src = e.target?.result as string;
       };
@@ -154,8 +153,11 @@ const Profile: React.FC<ProfileProps> = ({
       return;
     }
 
-    if (editForm.avatar?.startsWith('blob:')) {
-      setError('Aguarde a otimização da foto terminar.');
+    // Só bloqueia 'blob:' se o backend estiver configurado. 
+    // No modo offline, 'blob:' é o comportamento padrão do databaseService.
+    const isCloud = databaseService.isConnected();
+    if (isCloud && editForm.avatar?.startsWith('blob:')) {
+      setError('Aguarde o upload para a nuvem terminar.');
       setIsSaving(false);
       return;
     }
@@ -175,22 +177,23 @@ const Profile: React.FC<ProfileProps> = ({
       setIsUploadingPhoto(true);
       setError('');
       
-      // Preview imediato
       const tempUrl = URL.createObjectURL(file);
       setEditForm(prev => ({ ...prev, avatar: tempUrl }));
       
-      // Otimização (instantâneo no client)
-      const optimizedBlob = await optimizeImage(file);
-      
-      const fileName = `avatar_${user.username}_${Date.now()}.jpg`;
-      const uploadedUrl = await databaseService.uploadFile('avatars', optimizedBlob, fileName);
-      
-      if (uploadedUrl) {
-        setEditForm(prev => ({ ...prev, avatar: uploadedUrl }));
-      } else {
-        setError('Erro ao enviar foto otimizada.');
+      try {
+        const optimizedBlob = await optimizeImage(file);
+        const fileName = `avatar_${user.username}_${Date.now()}.jpg`;
+        const uploadedUrl = await databaseService.uploadFile('avatars', optimizedBlob, fileName);
+        
+        if (uploadedUrl) {
+          setEditForm(prev => ({ ...prev, avatar: uploadedUrl }));
+        }
+      } catch (err) {
+        console.error("Erro no processamento da imagem:", err);
+        setError('Erro ao processar imagem.');
+      } finally {
+        setIsUploadingPhoto(false);
       }
-      setIsUploadingPhoto(false);
     }
   };
 
@@ -282,7 +285,7 @@ const Profile: React.FC<ProfileProps> = ({
                     {editForm.avatar ? <img src={editForm.avatar} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center opacity-40">FOTO</div>}
                     
                     <div className={`absolute inset-0 bg-black/60 flex items-center justify-center transition-opacity text-[8px] font-black ${isUploadingPhoto ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                      {isUploadingPhoto ? 'OTIMIZANDO...' : 'TROCAR'}
+                      {isUploadingPhoto ? 'PROCESSANDO...' : 'TROCAR'}
                     </div>
                     
                     {isUploadingPhoto && (
