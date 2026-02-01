@@ -56,11 +56,8 @@ const App: React.FC = () => {
       ]);
       
       if (rawProfiles && rawProfiles.length > 0) {
-        // Normalização robusta: transforma o objeto plano do DB no objeto estruturado do App
         const normalized: AccountData[] = rawProfiles.map((p: any) => {
-          // Se já for um AccountData (cache local), retorna. Se for flat (Convex), converte.
           if (p.profile && typeof p.profile === 'object' && p.profile.username) return p;
-          
           return {
             profile: { 
               username: p.username,
@@ -83,7 +80,6 @@ const App: React.FC = () => {
             password: p.password || ''
           };
         });
-        
         setAccounts(normalized);
         localStorage.setItem('CORE_PROFILES', JSON.stringify(normalized));
       }
@@ -102,7 +98,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    const syncInterval = setInterval(loadData, 15000);
+    const syncInterval = setInterval(loadData, 20000); // 20 segundos para poupar API
     return () => clearInterval(syncInterval);
   }, [loadData]);
 
@@ -142,7 +138,6 @@ const App: React.FC = () => {
         }
         return a;
       });
-      localStorage.setItem('CORE_PROFILES', JSON.stringify(updated));
       return updated;
     });
   }, []);
@@ -157,7 +152,6 @@ const App: React.FC = () => {
         }
         return v;
       });
-      localStorage.setItem('CORE_VIDEOS', JSON.stringify(updated));
       return updated;
     });
   }, []);

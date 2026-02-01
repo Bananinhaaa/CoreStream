@@ -4,6 +4,32 @@ import { httpAction } from "./server";
 
 const http = httpRouter();
 
+// Endpoint para listar vídeos
+http.route({
+  path: "/listVideos",
+  method: "POST",
+  handler: httpAction(async (ctx: any, request: Request) => {
+    const videos = await ctx.runQuery("videos:list");
+    return new Response(JSON.stringify({ value: videos }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  }),
+});
+
+// Endpoint para listar perfis
+http.route({
+  path: "/listProfiles",
+  method: "POST",
+  handler: httpAction(async (ctx: any, request: Request) => {
+    const profiles = await ctx.runQuery("profiles:list");
+    return new Response(JSON.stringify({ value: profiles }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  }),
+});
+
 // Endpoint para salvar vídeos
 http.route({
   path: "/saveVideo",
