@@ -1,5 +1,4 @@
 
-// Importando do shim local "./server" para evitar conflitos de resolução de módulos e garantir acesso às definições corretas
 import { defineSchema, defineTable } from "./server";
 import { v } from "convex/values";
 

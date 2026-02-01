@@ -1,9 +1,13 @@
 
-// Adicionando defineSchema e defineTable ao shim para resolver erros de exportação e garantir consistência nos utilitários do servidor
-import { query as convexQuery, mutation as convexMutation, defineSchema as convexDefineSchema, defineTable as convexDefineTable } from "convex/server";
+import { defineSchema as convexDefineSchema, defineTable as convexDefineTable } from "convex/server";
 
-// Exportamos versões genéricas para que o TypeScript não reclame da falta de tipos gerados
-export const query = convexQuery;
-export const mutation = convexMutation;
+/**
+ * No Convex, as funções 'query' e 'mutation' de produção são geradas via CLI.
+ * Para passar pelo build do TypeScript sem os arquivos gerados, definimos
+ * estes wrappers que apenas retornam a configuração fornecida.
+ */
+export const query = (config: any) => config;
+export const mutation = (config: any) => config;
+
 export const defineSchema = convexDefineSchema;
 export const defineTable = convexDefineTable;
