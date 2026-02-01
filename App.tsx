@@ -57,24 +57,27 @@ const App: React.FC = () => {
       
       if (rawProfiles && rawProfiles.length > 0) {
         const normalized: AccountData[] = rawProfiles.map((p: any) => {
-          if (p.profile && typeof p.profile === 'object' && p.profile.username) return p;
+          // Se o dado vier do Convex, ele vem achatado. Reestruturamos para o App.
+          // Add missing email property to UserProfile
+          const profile: UserProfile = {
+            username: p.username,
+            displayName: p.displayName || p.username,
+            bio: p.bio || '',
+            avatar: p.avatar || '',
+            email: p.email || '',
+            followers: p.followers || 0,
+            following: p.following || 0,
+            likes: p.likes || 0,
+            isVerified: p.isVerified || false,
+            isAdmin: p.isAdmin || false,
+            isBanned: p.isBanned || false,
+            profileColor: p.profileColor || '#000000',
+            repostedVideoIds: p.repostedVideoIds || [],
+            notifications: p.notifications || [],
+            lastSeen: p.lastSeen || Date.now()
+          };
           return {
-            profile: { 
-              username: p.username,
-              displayName: p.displayName || p.username,
-              bio: p.bio || '',
-              avatar: p.avatar || '',
-              followers: p.followers || 0,
-              following: p.following || 0,
-              likes: p.likes || 0,
-              isVerified: p.isVerified || false,
-              isAdmin: p.isAdmin || false,
-              isBanned: p.isBanned || false,
-              profileColor: p.profileColor || '#000000',
-              repostedVideoIds: p.repostedVideoIds || [],
-              notifications: p.notifications || [],
-              lastSeen: p.lastSeen || Date.now()
-            },
+            profile,
             followingMap: p.followingMap || {},
             email: p.email || '',
             password: p.password || ''
@@ -96,9 +99,10 @@ const App: React.FC = () => {
     }
   }, []);
 
+  // Sincronização agressiva para que o navegador 2 veja o navegador 1 quase instantaneamente
   useEffect(() => {
     loadData();
-    const syncInterval = setInterval(loadData, 20000); // 20 segundos para poupar API
+    const syncInterval = setInterval(loadData, 5000); // 5 segundos para feeling de tempo real
     return () => clearInterval(syncInterval);
   }, [loadData]);
 
@@ -107,7 +111,7 @@ const App: React.FC = () => {
       databaseService.updatePresence(currentUsername);
       const heartbeat = setInterval(() => {
         databaseService.updatePresence(currentUsername);
-      }, 30000); 
+      }, 10000); 
       return () => clearInterval(heartbeat);
     }
   }, [isLoggedIn, currentUsername]);
@@ -123,7 +127,7 @@ const App: React.FC = () => {
     return acc;
   }, [accounts, currentUsername]);
 
-  const handleUpdateAccountStats = useCallback((username: string, stats: any) => {
+  const handleUpdateAccountStats = useCallback(async (username: string, stats: any) => {
     setAccounts(prev => {
       const updated = prev.map(a => {
         if (a.profile.username === username) {
@@ -142,7 +146,7 @@ const App: React.FC = () => {
     });
   }, []);
 
-  const handleUpdateVideoStats = useCallback((videoId: string, stats: any) => {
+  const handleUpdateVideoStats = useCallback(async (videoId: string, stats: any) => {
     setVideos(prev => {
       const updated = prev.map(v => {
         if (v.id === videoId) {
@@ -195,16 +199,18 @@ const App: React.FC = () => {
     return (
       <Auth 
         onLogin={async (id, isNew, pass, rand) => {
+          const idClean = id.toLowerCase().trim();
           const existingIdx = accounts.findIndex(a => 
-            a.email.toLowerCase() === id.toLowerCase() || 
-            a.profile.username.toLowerCase() === id.toLowerCase()
+            a.email.toLowerCase() === idClean || 
+            a.profile.username.toLowerCase() === idClean
           );
+          
           if (isNew && rand && existingIdx === -1) {
-            const isMaster = id.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase();
+            const isMaster = idClean === MASTER_ADMIN_EMAIL.toLowerCase();
             const newAcc: AccountData = { 
-              email: id, password: pass, followingMap: {}, 
+              email: idClean, password: pass, followingMap: {}, 
               profile: { 
-                ...rand, email: id, bio: '', avatar: '', followers: 0, following: 0, likes: 0, 
+                ...rand, email: idClean, bio: '', avatar: '', followers: 0, following: 0, likes: 0, 
                 repostedVideoIds: [], notifications: [], isVerified: isMaster, isAdmin: isMaster, 
                 isBanned: false, profileColor: '#000000', lastSeen: Date.now()
               } 
@@ -253,6 +259,7 @@ const App: React.FC = () => {
           />
         )}
         {activeTab === 'admin' && <AdminPanel accounts={accounts} videos={videos} onUpdateStats={handleUpdateAccountStats} onUpdateVideoStats={handleUpdateVideoStats} onDeleteVideo={()=>{}} onSendSystemMessage={()=>{}} onOpenSupport={()=>{}} onClose={() => setActiveTab('profile')} />}
+        {activeTab === 'switcher' && <AccountSwitcher accounts={accounts.map(a => a.profile)} onSelect={handleLoginSuccess} onAddAccount={handleLogout} onDeleteAccount={() => {}} onBack={() => setActiveTab('profile')} />}
       </main>
       <nav className={`h-[80px] border-t border-white/5 bg-black flex items-center justify-around px-2 z-50 ${['switcher', 'admin', 'support'].includes(activeTab) ? 'hidden' : ''}`}>
         <button onClick={() => { setViewingUser(null); setActiveTab('home'); }} className={`flex flex-col items-center ${activeTab === 'home' ? 'text-white' : 'text-gray-600'}`}><HomeIcon active={activeTab === 'home'} /><span className="text-[10px] mt-1 font-black uppercase tracking-tighter">Início</span></button>

@@ -35,8 +35,8 @@ const AccountSwitcher: React.FC<AccountSwitcherProps> = ({ accounts, onSelect, o
           type="text" 
           placeholder="Pesquisar contas logadas..."
           value={search}
-          onChange={e => setSearch(search)}
-          className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 pl-12 text-xs outline-none focus:border-white transition-all"
+          onChange={e => setSearch(e.target.value)}
+          className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 pl-12 text-xs outline-none focus:border-white transition-all text-white"
         />
         <div className="absolute left-4 top-1/2 -translate-y-1/2 opacity-30">
           <SearchIcon active />

@@ -25,27 +25,22 @@ export const databaseService = {
   },
 
   async uploadFile(bucket: 'videos' | 'avatars', file: File | Blob, path: string): Promise<string | null> {
-    // Se não estiver configurado ou for um avatar pequeno, usamos Base64 para persistência real no LocalStorage
     if (!isConfigured) {
       if (bucket === 'avatars') {
-        console.log("CORE: Convertendo avatar para Base64 (Persistência Local)");
         return await blobToBase64(file);
       }
       return URL.createObjectURL(file);
     }
     
     try {
-      // 1. Gera URL de upload no Convex
       const response = await fetch(`${convexUrl}/api/mutation/media/generateUploadUrl`, { method: "POST" });
       if (!response.ok) throw new Error("Upload URL failed");
       const { value: uploadUrl } = await response.json();
       
-      // 2. Upload binário para o Storage do Convex
       const result = await fetch(uploadUrl, { method: "POST", body: file });
       if (!result.ok) throw new Error("File upload failed");
       const { storageId } = await result.json();
       
-      // 3. Obtém URL pública permanente
       const getUrlResponse = await fetch(`${convexUrl}/api/query/media/getPublicUrl`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -54,11 +49,11 @@ export const databaseService = {
       if (!getUrlResponse.ok) throw new Error("Public URL failed");
       const { value: url } = await getUrlResponse.json();
       
+      console.log(`CORE: Upload para ${bucket} concluído com sucesso.`);
       return url;
     } catch (e) { 
-      console.error("Cloud Upload Error:", e);
-      // Se falhar o cloud, retorna Base64 como fallback para não perder a foto do usuário
-      return await blobToBase64(file); 
+      console.warn("Cloud Upload Fallback:", e);
+      return bucket === 'avatars' ? await blobToBase64(file) : URL.createObjectURL(file); 
     }
   },
 
@@ -85,11 +80,13 @@ export const databaseService = {
 
   async saveVideo(video: Video): Promise<void> {
     if (isConfigured) {
-      await fetch(`${convexUrl}/saveVideo`, {
-        method: 'POST',
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(video)
-      });
+      try {
+        await fetch(`${convexUrl}/saveVideo`, {
+          method: 'POST',
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(video)
+        });
+      } catch (e) { console.error("Falha ao salvar vídeo na nuvem:", e); }
     }
     const current = JSON.parse(localStorage.getItem('CORE_VIDEOS') || '[]');
     const updated = [video, ...current.filter((v: any) => v.id !== video.id)];
@@ -109,11 +106,13 @@ export const databaseService = {
 
   async saveProfile(account: any): Promise<void> {
     if (isConfigured) {
-      await fetch(`${convexUrl}/saveProfile`, {
-        method: 'POST',
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(account)
-      });
+      try {
+        await fetch(`${convexUrl}/saveProfile`, {
+          method: 'POST',
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(account)
+        });
+      } catch (e) { console.error("Falha ao salvar perfil na nuvem:", e); }
     }
     const current = JSON.parse(localStorage.getItem('CORE_PROFILES') || '[]');
     const updated = [account, ...current.filter((a: any) => {
