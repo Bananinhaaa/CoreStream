@@ -26,9 +26,10 @@ export const save = mutation({
     storageId: v.optional(v.string()),
   },
   handler: async (ctx: any, args: any) => {
+    // Busca pelo ID customizado em vez de _id do Convex
     const existing = await ctx.db
       .query("videos")
-      .filter((q: any) => q.eq(q.field("id"), args.id))
+      .withIndex("by_id", (q: any) => q.eq("id", args.id))
       .first();
 
     if (existing) {

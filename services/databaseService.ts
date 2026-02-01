@@ -5,6 +5,12 @@ import { INITIAL_VIDEOS } from '../constants';
 const convexUrl = (import.meta as any).env?.VITE_CONVEX_URL || '';
 const isConfigured = !!convexUrl && convexUrl !== 'undefined' && convexUrl.includes('.cloud');
 
+if (!isConfigured) {
+  console.warn("CORE: Backend Convex não detectado. Usando armazenamento local temporário. Vídeos e imagens sumirão ao reiniciar o site.");
+} else {
+  console.log("CORE: Conectado ao Cloud em " + convexUrl);
+}
+
 export const databaseService = {
   getConvexUrl(): string {
     return convexUrl;
@@ -28,7 +34,10 @@ export const databaseService = {
       });
       const { value: url } = await getUrlResponse.json();
       return url;
-    } catch (e) { return URL.createObjectURL(file); }
+    } catch (e) { 
+      console.error("Erro no upload para Cloud:", e);
+      return URL.createObjectURL(file); 
+    }
   },
 
   async updatePresence(username: string): Promise<void> {
@@ -65,9 +74,12 @@ export const databaseService = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ args: {} })
       });
-      const { value } = await response.json();
-      return value || localData;
-    } catch (e) { return localData; }
+      const data = await response.json();
+      return data.value || localData;
+    } catch (e) { 
+      console.error("Erro ao buscar vídeos da nuvem:", e);
+      return localData; 
+    }
   },
 
   async saveVideo(video: Video): Promise<void> {
@@ -81,7 +93,7 @@ export const databaseService = {
         method: 'POST',
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(video)
-      }).catch(console.error);
+      }).catch(err => console.error("Falha ao salvar vídeo na nuvem:", err));
     }
   },
 
@@ -97,9 +109,12 @@ export const databaseService = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ args: {} })
       });
-      const { value } = await response.json();
-      return value || localData;
-    } catch (e) { return localData; }
+      const data = await response.json();
+      return data.value || localData;
+    } catch (e) { 
+      console.error("Erro ao buscar perfis da nuvem:", e);
+      return localData; 
+    }
   },
 
   async saveProfile(account: any): Promise<void> {
@@ -117,7 +132,7 @@ export const databaseService = {
         method: 'POST',
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(account)
-      }).catch(console.error);
+      }).catch(err => console.error("Falha ao salvar perfil na nuvem:", err));
     }
   }
 };

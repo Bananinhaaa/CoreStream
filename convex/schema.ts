@@ -24,6 +24,7 @@ export default defineSchema({
   }).index("by_username", ["username"]),
 
   videos: defineTable({
+    id: v.string(), // ID gerado pelo frontend
     url: v.string(),
     username: v.string(),
     displayName: v.string(),
@@ -36,5 +37,5 @@ export default defineSchema({
     music: v.string(),
     isVerified: v.boolean(),
     storageId: v.optional(v.string()),
-  }).index("by_username", ["username"]),
+  }).index("by_id", ["id"]).index("by_username", ["username"]),
 });

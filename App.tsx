@@ -56,15 +56,15 @@ const App: React.FC = () => {
       ]);
       
       if (rawProfiles && rawProfiles.length > 0) {
-        // O Convex retorna objetos planos. Precisamos normalizar para AccountData
+        // Normalização robusta: transforma o objeto plano do DB no objeto estruturado do App
         const normalized: AccountData[] = rawProfiles.map((p: any) => {
-          // Se já vier normalizado (cache local), mantém. Se vier do Convex (flat), converte.
-          if (p.profile) return p;
+          // Se já for um AccountData (cache local), retorna. Se for flat (Convex), converte.
+          if (p.profile && typeof p.profile === 'object' && p.profile.username) return p;
           
           return {
             profile: { 
               username: p.username,
-              displayName: p.displayName,
+              displayName: p.displayName || p.username,
               bio: p.bio || '',
               avatar: p.avatar || '',
               followers: p.followers || 0,
@@ -79,8 +79,8 @@ const App: React.FC = () => {
               lastSeen: p.lastSeen || Date.now()
             },
             followingMap: p.followingMap || {},
-            email: p.email,
-            password: p.password
+            email: p.email || '',
+            password: p.password || ''
           };
         });
         
@@ -88,7 +88,7 @@ const App: React.FC = () => {
         localStorage.setItem('CORE_PROFILES', JSON.stringify(normalized));
       }
 
-      if (globalVideos) {
+      if (globalVideos && globalVideos.length > 0) {
         setVideos(globalVideos);
         localStorage.setItem('CORE_VIDEOS', JSON.stringify(globalVideos));
       }
@@ -102,11 +102,10 @@ const App: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    const syncInterval = setInterval(loadData, 15000); // Atualiza dados a cada 15s
+    const syncInterval = setInterval(loadData, 15000);
     return () => clearInterval(syncInterval);
   }, [loadData]);
 
-  // Heartbeat de Presença: Avisa ao Convex que o usuário está online a cada 30 segundos
   useEffect(() => {
     if (isLoggedIn && currentUsername) {
       databaseService.updatePresence(currentUsername);
