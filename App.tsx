@@ -27,7 +27,7 @@ interface AccountData {
 const MASTER_ADMIN_EMAIL = 'davielucas914@gmail.com';
 const SESSION_KEY = 'CORE_SESSION_ACTIVE';
 const ACTIVE_USER_KEY = 'CORE_ACTIVE_USERNAME';
-const PROFILES_STORAGE_KEY = 'CORE_PROFILES_V2';
+const PROFILES_STORAGE_KEY = 'CORE_PROFILES_V3';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('home');
@@ -54,7 +54,7 @@ const App: React.FC = () => {
   const [currentUsername, setCurrentUsername] = useState<string | null>(() => localStorage.getItem(ACTIVE_USER_KEY));
   const isSyncingRef = useRef(false);
 
-  // Função para normalizar perfis (Trata dados da Nuvem e Local)
+  // Normalização agressiva para garantir que os perfis nunca fiquem invisíveis
   const normalizeAccount = (p: any): AccountData | null => {
     const username = p.username || (p.profile && p.profile.username);
     if (!username) return null;
@@ -63,18 +63,18 @@ const App: React.FC = () => {
       username: username,
       displayName: p.displayName || (p.profile && p.profile.displayName) || username,
       bio: p.bio || (p.profile && p.profile.bio) || '',
-      avatar: p.avatar || (p.profile && p.profile.avatar) || p.avatarUrl || '',
+      avatar: p.avatar || (p.profile && p.profile.avatar) || '',
       email: p.email || (p.profile && p.profile.email) || '',
-      followers: Number(p.followers ?? (p.profile && p.profile.followers) ?? 0),
-      following: Number(p.following ?? (p.profile && p.profile.following) ?? 0),
-      likes: Number(p.likes ?? (p.profile && p.profile.likes) ?? 0),
-      isVerified: !!(p.isVerified ?? (p.profile && p.profile.isVerified)),
-      isAdmin: !!(p.isAdmin ?? (p.profile && p.profile.isAdmin)),
-      isBanned: !!(p.isBanned ?? (p.profile && p.profile.isBanned)),
-      profileColor: p.profileColor || (p.profile && p.profile.profileColor) || '#000000',
-      repostedVideoIds: p.repostedVideoIds || (p.profile && p.profile.repostedVideoIds) || [],
-      notifications: p.notifications || (p.profile && p.profile.notifications) || [],
-      lastSeen: p.lastSeen || (p.profile && p.profile.lastSeen) || Date.now()
+      followers: Number(p.followers ?? 0),
+      following: Number(p.following ?? 0),
+      likes: Number(p.likes ?? 0),
+      isVerified: !!p.isVerified,
+      isAdmin: !!p.isAdmin,
+      isBanned: !!p.isBanned,
+      profileColor: p.profileColor || '#000000',
+      repostedVideoIds: Array.isArray(p.repostedVideoIds) ? p.repostedVideoIds : [],
+      notifications: Array.isArray(p.notifications) ? p.notifications : [],
+      lastSeen: p.lastSeen || Date.now()
     };
 
     return {
@@ -98,22 +98,15 @@ const App: React.FC = () => {
       if (rawProfiles && Array.isArray(rawProfiles)) {
         setAccounts(prev => {
           const remoteMap = new Map<string, AccountData>();
-          
           rawProfiles.forEach(p => {
             const acc = normalizeAccount(p);
             if (acc) remoteMap.set(acc.profile.username, acc);
           });
 
-          // ESTRATÉGIA DE PRESERVAÇÃO:
-          // Começamos com os remotos, mas re-injetamos os locais que são importantes
-          const merged: AccountData[] = Array.from(remoteMap.values());
-          
+          // Unir dados remotos com locais (para não perder o login)
+          const merged = Array.from(remoteMap.values());
           prev.forEach(localAcc => {
-            // Se a conta local for a ativa, garantimos que ela não suma mesmo se o cloud falhar
-            const isMissingFromRemote = !remoteMap.has(localAcc.profile.username);
-            const isActive = localAcc.profile.username === currentUsername;
-            
-            if (isMissingFromRemote && isActive) {
+            if (!remoteMap.has(localAcc.profile.username) && localAcc.profile.username === currentUsername) {
               merged.push(localAcc);
             }
           });
@@ -124,16 +117,11 @@ const App: React.FC = () => {
       }
 
       if (globalVideos && Array.isArray(globalVideos)) {
-        setVideos(prev => {
-          const remoteIds = new Set(globalVideos.map(v => v.id));
-          const localOnly = prev.filter(v => !remoteIds.has(v.id));
-          const merged = [...globalVideos, ...localOnly];
-          localStorage.setItem('CORE_VIDEOS', JSON.stringify(merged));
-          return merged;
-        });
+        setVideos(globalVideos);
+        localStorage.setItem('CORE_VIDEOS', JSON.stringify(globalVideos));
       }
     } catch (e) {
-      console.warn("CORE: Sincronização em segundo plano falhou, usando cache local.");
+      console.warn("CORE: Offline - usando dados locais.");
     } finally {
       setIsDataReady(true);
       setIsLoading(false);
@@ -143,22 +131,131 @@ const App: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 10000);
+    const interval = setInterval(loadData, 8000); // Sincronia a cada 8s
     return () => clearInterval(interval);
   }, [loadData]);
 
+  // Atualizar presença online
+  useEffect(() => {
+    if (currentUsername) {
+      const pInterval = setInterval(() => {
+        databaseService.updatePresence(currentUsername);
+      }, 30000);
+      return () => clearInterval(pInterval);
+    }
+  }, [currentUsername]);
+
   const activeAccount = useMemo(() => {
-    if (!currentUsername || accounts.length === 0) return null;
-    const acc = accounts.find(a => a.profile.username === currentUsername);
-    if (acc) {
-      const isMaster = acc.email.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase();
-      if (isMaster) {
-        acc.profile.isAdmin = true;
-        acc.profile.isVerified = true;
+    if (!currentUsername) return null;
+    return accounts.find(a => a.profile.username === currentUsername) || null;
+  }, [accounts, currentUsername]);
+
+  // --- INTERAÇÕES ONLINE ---
+
+  const handleFollow = useCallback(async (targetUsername: string) => {
+    if (!activeAccount || activeAccount.profile.username === targetUsername) return;
+
+    const isFollowing = !!activeAccount.followingMap[targetUsername];
+    const newFollowingMap = { ...activeAccount.followingMap, [targetUsername]: !isFollowing };
+
+    // 1. Atualiza minha conta (Following)
+    const myUpdates = { 
+      following: Math.max(0, activeAccount.profile.following + (isFollowing ? -1 : 1)),
+      followingMap: newFollowingMap 
+    };
+
+    // 2. Atualiza conta do alvo (Followers + Notificação)
+    const targetAcc = accounts.find(a => a.profile.username === targetUsername);
+    if (targetAcc) {
+      const newNotif: Notification = {
+        id: Date.now().toString(),
+        type: 'follow',
+        fromUser: activeAccount.profile.username,
+        fromAvatar: activeAccount.profile.avatar,
+        timestamp: Date.now(),
+        text: 'começou a seguir você'
+      };
+      
+      const targetUpdates = {
+        followers: Math.max(0, targetAcc.profile.followers + (isFollowing ? -1 : 1)),
+        notifications: [newNotif, ...(targetAcc.profile.notifications || [])].slice(0, 30)
+      };
+
+      // Salva ambos na nuvem
+      databaseService.saveProfile({ ...activeAccount, ...myUpdates });
+      databaseService.saveProfile({ ...targetAcc, profile: { ...targetAcc.profile, ...targetUpdates } });
+      
+      // Atualiza estado local para feedback instantâneo
+      setAccounts(prev => prev.map(a => {
+        if (a.profile.username === activeAccount.profile.username) return { ...a, ...myUpdates, profile: { ...a.profile, following: myUpdates.following } };
+        if (a.profile.username === targetUsername) return { ...a, profile: { ...a.profile, ...targetUpdates } };
+        return a;
+      }));
+    }
+  }, [activeAccount, accounts]);
+
+  const handleLikeVideo = useCallback(async (videoId: string) => {
+    if (!activeAccount) return;
+    const video = videos.find(v => v.id === videoId);
+    if (!video) return;
+
+    const isLiked = !video.isLiked;
+    const newLikes = Math.max(0, video.likes + (isLiked ? 1 : -1));
+
+    // Atualiza Vídeo
+    const updatedVideo = { ...video, isLiked, likes: newLikes };
+    databaseService.saveVideo(updatedVideo);
+
+    // Atualiza Total de Likes do Dono do Vídeo
+    const owner = accounts.find(a => a.profile.username === video.username);
+    if (owner) {
+      const ownerLikes = Math.max(0, (owner.profile.likes || 0) + (isLiked ? 1 : -1));
+      databaseService.saveProfile({ ...owner, profile: { ...owner.profile, likes: ownerLikes } });
+    }
+
+    setVideos(prev => prev.map(v => v.id === videoId ? updatedVideo : v));
+  }, [activeAccount, videos, accounts]);
+
+  const handleAddComment = useCallback(async (videoId: string, text: string) => {
+    if (!activeAccount) return;
+    const video = videos.find(v => v.id === videoId);
+    if (!video) return;
+
+    const newComment: Comment = {
+      id: Date.now().toString(),
+      username: activeAccount.profile.username,
+      displayName: activeAccount.profile.displayName,
+      avatar: activeAccount.profile.avatar,
+      text,
+      timestamp: Date.now(),
+      likes: 0
+    };
+
+    const updatedComments = [...(video.comments || []), newComment];
+    const updatedVideo = { ...video, comments: updatedComments };
+    
+    // Salva vídeo com novo comentário
+    databaseService.saveVideo(updatedVideo);
+
+    // Notifica dono do vídeo
+    if (video.username !== activeAccount.profile.username) {
+      const owner = accounts.find(a => a.profile.username === video.username);
+      if (owner) {
+        const notif: Notification = {
+          id: Date.now().toString(),
+          type: 'comment',
+          fromUser: activeAccount.profile.username,
+          fromAvatar: activeAccount.profile.avatar,
+          timestamp: Date.now(),
+          text: `comentou: "${text.substring(0, 20)}..."`,
+          videoId
+        };
+        databaseService.saveProfile({ ...owner, profile: { ...owner.profile, notifications: [notif, ...(owner.profile.notifications || [])] } });
       }
     }
-    return acc || null;
-  }, [accounts, currentUsername]);
+
+    setVideos(prev => prev.map(v => v.id === videoId ? updatedVideo : v));
+  }, [activeAccount, videos, accounts]);
 
   const handleLoginSuccess = useCallback((username: string) => {
     localStorage.setItem(ACTIVE_USER_KEY, username);
@@ -175,135 +272,50 @@ const App: React.FC = () => {
     setActiveTab('home');
   }, []);
 
-  const handleUpdateAccountStats = useCallback(async (username: string, stats: any) => {
-    setAccounts(prev => {
-      const updated = prev.map(a => {
-        if (a.profile.username === username) {
-          const newAcc = { 
-            ...a, 
-            profile: { ...a.profile, ...stats },
-            email: stats.email || a.email,
-            password: stats.password || a.password
-          };
-          databaseService.saveProfile(newAcc);
-          return newAcc;
-        }
-        return a;
-      });
-      return updated;
-    });
-  }, []);
-
-  const handleUpdateVideoStats = useCallback(async (videoId: string, stats: any) => {
-    setVideos(prev => {
-      const updated = prev.map(v => {
-        if (v.id === videoId) {
-          const newVideo = { ...v, ...stats };
-          databaseService.saveVideo(newVideo);
-          return newVideo;
-        }
-        return v;
-      });
-      return updated;
-    });
-  }, []);
-
-  const handleLikeVideo = useCallback((videoId: string) => {
-    const targetVideo = videos.find(v => v.id === videoId);
-    if (!targetVideo) return;
-    const isLikedNow = !targetVideo.isLiked;
-    handleUpdateVideoStats(videoId, { 
-      isLiked: isLikedNow, 
-      likes: Math.max(0, (targetVideo.likes || 0) + (isLikedNow ? 1 : -1)) 
-    });
-  }, [videos, handleUpdateVideoStats]);
-
-  // UI de Login/Splash
   if (isLoading && accounts.length === 0) {
     return (
       <div className="h-screen bg-black flex flex-col items-center justify-center p-12 text-center">
         <Logo size={100} className="mb-12 animate-pulse" />
-        <h2 className="text-xl font-black italic uppercase tracking-tighter mb-2">CORE CLOUD</h2>
-        <p className="text-[10px] font-black uppercase tracking-[0.4em] text-white/40">Sincronizando Identidades...</p>
+        <h2 className="text-xl font-black italic uppercase tracking-tighter">CORE ONLINE</h2>
       </div>
     );
   }
 
   if (!isLoggedIn) {
-    return (
-      <Auth 
-        onLogin={async (id, isNew, pass, rand) => {
-          const idClean = id.toLowerCase().trim();
-          const existingIdx = accounts.findIndex(a => 
-            a.email.toLowerCase() === idClean || 
-            a.profile.username.toLowerCase() === idClean
-          );
-          
-          if (isNew && rand && existingIdx === -1) {
-            const isMaster = idClean === MASTER_ADMIN_EMAIL.toLowerCase();
-            const newAcc: AccountData = { 
-              email: idClean, password: pass, followingMap: {}, 
-              profile: { 
-                ...rand, email: idClean, bio: '', avatar: '', followers: 0, following: 0, likes: 0, 
-                repostedVideoIds: [], notifications: [], isVerified: isMaster, isAdmin: isMaster, 
-                isBanned: false, profileColor: '#000000', lastSeen: Date.now()
-              } 
-            };
-            setAccounts(prev => [...prev, newAcc]);
-            handleLoginSuccess(newAcc.profile.username);
-            await databaseService.saveProfile(newAcc);
-          } else if (existingIdx !== -1) {
-            const acc = accounts[existingIdx];
-            if (!pass || acc.password === pass) handleLoginSuccess(acc.profile.username);
-          }
-        }} 
-        registeredAccounts={accounts.map(a => ({ email: a.email, username: a.profile.username, password: a.password }))} 
-      />
-    );
+    return <Auth onLogin={handleLoginSuccess} registeredAccounts={accounts.map(a => ({ email: a.email, username: a.profile.username, password: a.password }))} />;
   }
 
-  if (!activeAccount && isDataReady) {
-    // Se logado mas conta sumiu, tentamos restaurar o backup
-    return (
-      <div className="h-screen bg-black flex flex-col items-center justify-center p-12 text-center">
-        <Logo size={60} className="mb-8 opacity-20" />
-        <p className="text-[10px] font-black uppercase text-rose-500 mb-8">Conta Local Corrompida</p>
-        <button onClick={handleLogout} className="bg-white text-black px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest">Reiniciar Sessão</button>
-      </div>
-    );
+  if (!activeAccount) {
+    if (isDataReady) handleLogout();
+    return null;
   }
-
-  if (!activeAccount) return null;
 
   const profileToRender = viewingUser ? accounts.find(a => a.profile.username === viewingUser)?.profile : activeAccount.profile;
 
   return (
     <div className="flex flex-col h-screen bg-black text-white overflow-hidden">
       <main className="flex-1 relative overflow-hidden">
-        {activeTab === 'home' && <Feed videos={videos} currentUser={activeAccount.profile} onLike={handleLikeVideo} onFollow={()=>{}} onRepost={()=>{}} onAddComment={()=>{}} onNavigateToProfile={u => { setViewingUser(u); setActiveTab('profile'); }} followingMap={activeAccount.followingMap} isMuted={isMuted} setIsMuted={setIsMuted} onSearchClick={() => setActiveTab('discover')} onDeleteComment={()=>{}} onDeleteVideo={()=>{}} onToggleComments={() => {}} onLikeComment={()=>{}} allAccounts={accounts.map(a => a.profile)} />}
+        {activeTab === 'home' && <Feed videos={videos} currentUser={activeAccount.profile} onLike={handleLikeVideo} onFollow={handleFollow} onRepost={()=>{}} onAddComment={handleAddComment} onNavigateToProfile={u => { setViewingUser(u); setActiveTab('profile'); }} followingMap={activeAccount.followingMap} isMuted={isMuted} setIsMuted={setIsMuted} onSearchClick={() => setActiveTab('discover')} onDeleteComment={()=>{}} onDeleteVideo={()=>{}} onToggleComments={() => {}} onLikeComment={()=>{}} allAccounts={accounts.map(a => a.profile)} />}
         {activeTab === 'discover' && <Discover videos={videos} onNavigateToProfile={u => { setViewingUser(u); setActiveTab('profile'); }} currentUser={activeAccount.profile} allAccounts={accounts} />}
         {activeTab === 'create' && <Create onAddVideo={(v) => { setVideos([v, ...videos]); databaseService.saveVideo(v); setActiveTab('home'); }} currentUser={activeAccount.profile} allAccounts={accounts} />}
         {activeTab === 'inbox' && <Inbox currentUser={activeAccount.profile} onNavigateToProfile={u => { setViewingUser(u); setActiveTab('profile'); }} videos={videos} />}
         {activeTab === 'profile' && profileToRender && (
           <Profile 
             user={profileToRender} videos={videos} isOwnProfile={!viewingUser || viewingUser === activeAccount.profile.username} currentUser={activeAccount.profile}
-            onFollow={()=>{}} onLike={handleLikeVideo} onRepost={()=>{}} onAddComment={()=>{}} onLogout={handleLogout}
-            onUpdateProfile={handleUpdateAccountStats} onDeleteComment={()=>{}} onDeleteVideo={()=>{}} onToggleComments={() => {}} followingMap={activeAccount.followingMap}
+            onFollow={handleFollow} onLike={handleLikeVideo} onRepost={()=>{}} onAddComment={handleAddComment} onLogout={handleLogout}
+            onUpdateProfile={(old, up) => databaseService.saveProfile({...activeAccount, profile: {...activeAccount.profile, ...up}})} onDeleteComment={()=>{}} onDeleteVideo={()=>{}} onToggleComments={() => {}} followingMap={activeAccount.followingMap}
             onNavigateToProfile={u => { setViewingUser(u); setActiveTab('profile'); }} onSwitchAccount={() => setActiveTab('switcher')} allAccountsData={accounts} 
             onOpenAdmin={() => setActiveTab('admin')} onOpenSupport={() => setActiveTab('support')}
             onLikeComment={()=>{}} isMuted={isMuted} setIsMuted={setIsMuted}
           />
         )}
-        {activeTab === 'admin' && <AdminPanel accounts={accounts} videos={videos} onUpdateStats={handleUpdateAccountStats} onUpdateVideoStats={handleUpdateVideoStats} onDeleteVideo={()=>{}} onSendSystemMessage={()=>{}} onOpenSupport={()=>{}} onClose={() => setActiveTab('profile')} />}
-        {activeTab === 'support' && <SupportPanel accounts={accounts} videos={videos} onUpdateStats={handleUpdateAccountStats} onDeleteVideo={()=>{}} onClose={() => setActiveTab('profile')} />}
-        {activeTab === 'switcher' && <AccountSwitcher accounts={accounts.map(a => a.profile)} onSelect={handleLoginSuccess} onAddAccount={handleLogout} onDeleteAccount={() => {}} onBack={() => setActiveTab('profile')} />}
       </main>
       <nav className={`h-[80px] border-t border-white/5 bg-black flex items-center justify-around px-2 z-50 ${['switcher', 'admin', 'support'].includes(activeTab) ? 'hidden' : ''}`}>
-        <button onClick={() => { setViewingUser(null); setActiveTab('home'); }} className={`flex flex-col items-center ${activeTab === 'home' ? 'text-white' : 'text-gray-600'}`}><HomeIcon active={activeTab === 'home'} /><span className="text-[10px] mt-1 font-black uppercase tracking-tighter">Início</span></button>
-        <button onClick={() => { setViewingUser(null); setActiveTab('discover'); }} className={`flex flex-col items-center ${activeTab === 'discover' ? 'text-white' : 'text-gray-600'}`}><SearchIcon active={activeTab === 'discover'} /><span className="text-[10px] mt-1 font-black uppercase tracking-tighter">Explorar</span></button>
+        <button onClick={() => { setViewingUser(null); setActiveTab('home'); }} className={`flex flex-col items-center ${activeTab === 'home' ? 'text-white' : 'text-gray-600'}`}><HomeIcon active={activeTab === 'home'} /><span className="text-[10px] mt-1 font-black uppercase">Início</span></button>
+        <button onClick={() => { setViewingUser(null); setActiveTab('discover'); }} className={`flex flex-col items-center ${activeTab === 'discover' ? 'text-white' : 'text-gray-600'}`}><SearchIcon active={activeTab === 'discover'} /><span className="text-[10px] mt-1 font-black uppercase">Explorar</span></button>
         <button onClick={() => setActiveTab('create')} className="relative -top-2"><div className="w-14 h-11 bg-white rounded-2xl flex items-center justify-center shadow-xl"><PlusIcon /></div></button>
-        <button onClick={() => { setViewingUser(null); setActiveTab('inbox'); }} className={`flex flex-col items-center ${activeTab === 'inbox' ? 'text-white' : 'text-gray-600'}`}><MessageIcon active={activeTab === 'inbox'} /><span className="text-[10px] mt-1 font-black uppercase tracking-tighter">Inbox</span></button>
-        <button onClick={() => { setViewingUser(null); setActiveTab('profile'); }} className={`flex flex-col items-center ${activeTab === 'profile' ? 'text-white' : 'text-gray-600'}`}><UserIcon active={activeTab === 'profile'} /><span className="text-[10px] mt-1 font-black uppercase tracking-tighter">Perfil</span></button>
+        <button onClick={() => { setViewingUser(null); setActiveTab('inbox'); }} className={`flex flex-col items-center ${activeTab === 'inbox' ? 'text-white' : 'text-gray-600'}`}><MessageIcon active={activeTab === 'inbox'} /><span className="text-[10px] mt-1 font-black uppercase">Inbox</span></button>
+        <button onClick={() => { setViewingUser(null); setActiveTab('profile'); }} className={`flex flex-col items-center ${activeTab === 'profile' ? 'text-white' : 'text-gray-600'}`}><UserIcon active={activeTab === 'profile'} /><span className="text-[10px] mt-1 font-black uppercase">Perfil</span></button>
       </nav>
     </div>
   );
