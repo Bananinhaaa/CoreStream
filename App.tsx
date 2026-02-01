@@ -34,7 +34,6 @@ const App: React.FC = () => {
   const [viewingUser, setViewingUser] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
-  const [isDataReady, setIsDataReady] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(() => localStorage.getItem(SESSION_KEY) === 'true');
   
   const [accounts, setAccounts] = useState<AccountData[]>(() => {
@@ -54,33 +53,31 @@ const App: React.FC = () => {
   const [currentUsername, setCurrentUsername] = useState<string | null>(() => localStorage.getItem(ACTIVE_USER_KEY));
   const isSyncingRef = useRef(false);
 
-  // Normalização de dados para garantir que perfis da nuvem apareçam corretamente
   const normalizeAccount = useCallback((p: any): AccountData | null => {
-    const username = p.username || (p.profile && p.profile.username);
+    const profileData = p.profile || p;
+    const username = profileData.username;
     if (!username) return null;
 
-    const profile: UserProfile = {
-      username: username,
-      displayName: p.displayName || (p.profile && p.profile.displayName) || username,
-      bio: p.bio || (p.profile && p.profile.bio) || '',
-      avatar: p.avatar || (p.profile && p.profile.avatar) || '',
-      email: p.email || (p.profile && p.profile.email) || '',
-      followers: Number(p.followers ?? (p.profile && p.profile.followers) ?? 0),
-      following: Number(p.following ?? (p.profile && p.profile.following) ?? 0),
-      likes: Number(p.likes ?? (p.profile && p.profile.likes) ?? 0),
-      isVerified: !!(p.isVerified ?? (p.profile && p.profile.isVerified)),
-      isAdmin: !!(p.isAdmin ?? (p.profile && p.profile.isAdmin)),
-      isBanned: !!(p.isBanned ?? (p.profile && p.profile.isBanned)),
-      profileColor: p.profileColor || (p.profile && p.profile.profileColor) || '#000000',
-      repostedVideoIds: Array.isArray(p.repostedVideoIds) ? p.repostedVideoIds : (p.profile?.repostedVideoIds || []),
-      notifications: Array.isArray(p.notifications) ? p.notifications : (p.profile?.notifications || []),
-      lastSeen: p.lastSeen || (p.profile && p.profile.lastSeen) || Date.now()
-    };
-
     return {
-      profile,
+      profile: {
+        username: username,
+        displayName: profileData.displayName || username,
+        bio: profileData.bio || '',
+        avatar: profileData.avatar || '',
+        email: p.email || profileData.email || '',
+        followers: Number(profileData.followers || 0),
+        following: Number(profileData.following || 0),
+        likes: Number(profileData.likes || 0),
+        isVerified: !!profileData.isVerified,
+        isAdmin: !!profileData.isAdmin,
+        isBanned: !!profileData.isBanned,
+        profileColor: profileData.profileColor || '#000000',
+        repostedVideoIds: Array.isArray(profileData.repostedVideoIds) ? profileData.repostedVideoIds : [],
+        notifications: Array.isArray(profileData.notifications) ? profileData.notifications : [],
+        lastSeen: profileData.lastSeen || Date.now()
+      },
       followingMap: p.followingMap || {},
-      email: p.email || profile.email,
+      email: p.email || profileData.email || '',
       password: p.password || ''
     };
   }, []);
@@ -103,7 +100,7 @@ const App: React.FC = () => {
             if (acc) remoteMap.set(acc.profile.username, acc);
           });
 
-          // Unir dados remotos com locais (para não perder o login ativo se o cloud falhar)
+          // Unir dados remotos com locais para não perder a conta ativa
           const merged = Array.from(remoteMap.values());
           prev.forEach(localAcc => {
             if (!remoteMap.has(localAcc.profile.username) && localAcc.profile.username === currentUsername) {
@@ -111,9 +108,7 @@ const App: React.FC = () => {
             }
           });
 
-          if (merged.length > 0) {
-            localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(merged));
-          }
+          localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(merged));
           return merged;
         });
       }
@@ -123,9 +118,8 @@ const App: React.FC = () => {
         localStorage.setItem('CORE_VIDEOS', JSON.stringify(globalVideos));
       }
     } catch (e) {
-      console.warn("CORE: Sincronização falhou, usando dados locais.");
+      console.warn("CORE: Sincronização offline.");
     } finally {
-      setIsDataReady(true);
       setIsLoading(false);
       isSyncingRef.current = false;
     }
@@ -154,7 +148,6 @@ const App: React.FC = () => {
     const idClean = identifier.toLowerCase().trim();
     
     if (isNew && randomData) {
-      // PROCESSO DE CADASTRO
       const isMaster = idClean === MASTER_ADMIN_EMAIL.toLowerCase();
       const newAcc: AccountData = {
         email: idClean,
@@ -163,40 +156,20 @@ const App: React.FC = () => {
         profile: {
           username: randomData.username,
           displayName: randomData.displayName,
-          bio: '',
-          avatar: '',
-          email: idClean,
-          followers: 0,
-          following: 0,
-          likes: 0,
-          isVerified: isMaster,
-          isAdmin: isMaster,
-          isBanned: false,
-          profileColor: '#000000',
-          repostedVideoIds: [],
-          notifications: [],
+          bio: '', avatar: '', email: idClean,
+          followers: 0, following: 0, likes: 0,
+          isVerified: isMaster, isAdmin: isMaster, isBanned: false,
+          profileColor: '#000000', repostedVideoIds: [], notifications: [],
           lastSeen: Date.now()
         }
       };
 
-      // Adiciona ao estado e salva
-      setAccounts(prev => {
-        const updated = [newAcc, ...prev];
-        localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(updated));
-        return updated;
-      });
-      
+      setAccounts(prev => [newAcc, ...prev]);
       await databaseService.saveProfile(newAcc);
       handleLoginSuccess(newAcc.profile.username);
     } else {
-      // PROCESSO DE LOGIN (A validação real já acontece no componente Auth, aqui apenas confirmamos a sessão)
-      const acc = accounts.find(a => 
-        a.email.toLowerCase() === idClean || 
-        a.profile.username.toLowerCase() === idClean
-      );
-      if (acc) {
-        handleLoginSuccess(acc.profile.username);
-      }
+      const acc = accounts.find(a => a.email.toLowerCase() === idClean || a.profile.username.toLowerCase() === idClean);
+      if (acc) handleLoginSuccess(acc.profile.username);
     }
   }, [accounts, handleLoginSuccess]);
 
@@ -208,29 +181,28 @@ const App: React.FC = () => {
     setActiveTab('home');
   }, []);
 
-  // Interações Online
+  // Interações Online (Like, Follow, Comment)
   const handleFollow = useCallback(async (targetUsername: string) => {
     if (!activeAccount || activeAccount.profile.username === targetUsername) return;
     const isFollowing = !!activeAccount.followingMap[targetUsername];
-    const newFollowingMap = { ...activeAccount.followingMap, [targetUsername]: !isFollowing };
+    const newMap = { ...activeAccount.followingMap, [targetUsername]: !isFollowing };
     
-    const myUpdates = { 
-      following: Math.max(0, activeAccount.profile.following + (isFollowing ? -1 : 1)),
-      followingMap: newFollowingMap 
+    const updatedMe = { 
+      ...activeAccount, 
+      followingMap: newMap, 
+      profile: { ...activeAccount.profile, following: Math.max(0, activeAccount.profile.following + (isFollowing ? -1 : 1)) }
     };
 
     const targetAcc = accounts.find(a => a.profile.username === targetUsername);
     if (targetAcc) {
-      const targetUpdates = {
-        followers: Math.max(0, targetAcc.profile.followers + (isFollowing ? -1 : 1)),
+      const updatedTarget = { 
+        ...targetAcc, 
+        profile: { ...targetAcc.profile, followers: Math.max(0, targetAcc.profile.followers + (isFollowing ? -1 : 1)) }
       };
-      
-      const updatedMe = { ...activeAccount, followingMap: newFollowingMap, profile: { ...activeAccount.profile, following: myUpdates.following } };
-      const updatedTarget = { ...targetAcc, profile: { ...targetAcc.profile, followers: targetUpdates.followers } };
 
       setAccounts(prev => prev.map(a => {
-        if (a.profile.username === activeAccount.profile.username) return updatedMe;
-        if (a.profile.username === targetUsername) return updatedTarget;
+        if (a.profile.username === updatedMe.profile.username) return updatedMe;
+        if (a.profile.username === updatedTarget.profile.username) return updatedTarget;
         return a;
       }));
 
@@ -247,8 +219,7 @@ const App: React.FC = () => {
     if (!video) return;
 
     const isLiked = !video.isLiked;
-    const newLikes = Math.max(0, (video.likes || 0) + (isLiked ? 1 : -1));
-    const updatedVideo = { ...video, isLiked, likes: newLikes };
+    const updatedVideo = { ...video, isLiked, likes: Math.max(0, (video.likes || 0) + (isLiked ? 1 : -1)) };
 
     setVideos(prev => prev.map(v => v.id === videoId ? updatedVideo : v));
     await databaseService.saveVideo(updatedVideo);
@@ -258,27 +229,17 @@ const App: React.FC = () => {
     return (
       <div className="h-screen bg-black flex flex-col items-center justify-center p-12 text-center">
         <Logo size={100} className="mb-12 animate-pulse" />
-        <h2 className="text-xl font-black italic uppercase tracking-tighter">CORE STREAM</h2>
-        <p className="text-[10px] font-black uppercase tracking-[0.4em] text-white/40">Iniciando Sistema...</p>
+        <h2 className="text-xl font-black italic uppercase tracking-tighter">CORE CLOUD</h2>
       </div>
     );
   }
 
   if (!isLoggedIn) {
-    return (
-      <Auth 
-        onLogin={handleAuth} 
-        registeredAccounts={accounts.map(a => ({ 
-          email: a.email, 
-          username: a.profile.username, 
-          password: a.password 
-        }))} 
-      />
-    );
+    return <Auth onLogin={handleAuth} registeredAccounts={accounts.map(a => ({ email: a.email, username: a.profile.username, password: a.password }))} />;
   }
 
   if (!activeAccount) {
-    if (isDataReady) handleLogout();
+    if (!isLoading) handleLogout();
     return null;
   }
 
@@ -287,15 +248,7 @@ const App: React.FC = () => {
   return (
     <div className="flex flex-col h-screen bg-black text-white overflow-hidden">
       <main className="flex-1 relative overflow-hidden">
-        {activeTab === 'home' && (
-          <Feed 
-            videos={videos} currentUser={activeAccount.profile} onLike={handleLikeVideo} onFollow={handleFollow} 
-            onRepost={()=>{}} onAddComment={()=>{}} onNavigateToProfile={u => { setViewingUser(u); setActiveTab('profile'); }} 
-            followingMap={activeAccount.followingMap} isMuted={isMuted} setIsMuted={setIsMuted} 
-            onSearchClick={() => setActiveTab('discover')} onDeleteComment={()=>{}} onDeleteVideo={()=>{}} 
-            onToggleComments={() => {}} onLikeComment={()=>{}} allAccounts={accounts.map(a => a.profile)} 
-          />
-        )}
+        {activeTab === 'home' && <Feed videos={videos} currentUser={activeAccount.profile} onLike={handleLikeVideo} onFollow={handleFollow} onRepost={()=>{}} onAddComment={()=>{}} onNavigateToProfile={u => { setViewingUser(u); setActiveTab('profile'); }} followingMap={activeAccount.followingMap} isMuted={isMuted} setIsMuted={setIsMuted} onSearchClick={() => setActiveTab('discover')} onDeleteComment={()=>{}} onDeleteVideo={()=>{}} onToggleComments={() => {}} onLikeComment={()=>{}} allAccounts={accounts.map(a => a.profile)} />}
         {activeTab === 'discover' && <Discover videos={videos} onNavigateToProfile={u => { setViewingUser(u); setActiveTab('profile'); }} currentUser={activeAccount.profile} allAccounts={accounts} />}
         {activeTab === 'create' && <Create onAddVideo={(v) => { setVideos([v, ...videos]); databaseService.saveVideo(v); setActiveTab('home'); }} currentUser={activeAccount.profile} allAccounts={accounts} />}
         {activeTab === 'inbox' && <Inbox currentUser={activeAccount.profile} onNavigateToProfile={u => { setViewingUser(u); setActiveTab('profile'); }} videos={videos} />}

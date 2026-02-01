@@ -6,89 +6,107 @@ const convexUrl = (import.meta as any).env?.VITE_CONVEX_URL || '';
 const isConfigured = !!convexUrl && convexUrl !== 'undefined' && convexUrl.includes('.cloud');
 const PROFILES_STORAGE_KEY = 'CORE_PROFILES_V3';
 
+const fileToBase64 = (file: File | Blob): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = error => reject(error);
+  });
+};
+
 export const databaseService = {
   getConvexUrl(): string { return convexUrl; },
   isConnected(): boolean { return isConfigured; },
 
   async updatePresence(username: string): Promise<void> {
     if (!isConfigured) return;
-    fetch(`${convexUrl}/updatePresence`, {
-      method: 'POST',
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, lastSeen: Date.now() })
-    }).catch(() => {});
+    try {
+      await fetch(`${convexUrl}/updatePresence`, {
+        method: 'POST',
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, lastSeen: Date.now() })
+      });
+    } catch (e) {}
   },
 
   async getVideos(): Promise<Video[] | null> {
-    if (!isConfigured) return JSON.parse(localStorage.getItem('CORE_VIDEOS') || '[]');
+    const local = JSON.parse(localStorage.getItem('CORE_VIDEOS') || '[]');
+    if (!isConfigured) return local.length ? local : INITIAL_VIDEOS;
     try {
       const response = await fetch(`${convexUrl}/listVideos`, { method: 'POST' });
       const data = await response.json();
-      return Array.isArray(data.value) ? data.value : [];
-    } catch (e) { return null; }
+      return Array.isArray(data.value) ? data.value : local;
+    } catch (e) { return local; }
   },
 
   async saveVideo(video: Video): Promise<void> {
-    if (isConfigured) {
-      fetch(`${convexUrl}/saveVideo`, {
-        method: 'POST',
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(video)
-      }).catch(e => console.error("Cloud Save Video Error", e));
-    }
     const current = JSON.parse(localStorage.getItem('CORE_VIDEOS') || '[]');
     const updated = [video, ...current.filter((v: any) => v.id !== video.id)];
     localStorage.setItem('CORE_VIDEOS', JSON.stringify(updated));
+
+    if (isConfigured) {
+      try {
+        await fetch(`${convexUrl}/saveVideo`, {
+          method: 'POST',
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(video)
+        });
+      } catch (e) { console.error("Cloud Error (Video):", e); }
+    }
   },
 
   async getProfiles(): Promise<any[] | null> {
-    if (!isConfigured) return JSON.parse(localStorage.getItem(PROFILES_STORAGE_KEY) || '[]');
+    const local = JSON.parse(localStorage.getItem(PROFILES_STORAGE_KEY) || '[]');
+    if (!isConfigured) return local;
     try {
       const response = await fetch(`${convexUrl}/listProfiles`, { method: 'POST' });
       const data = await response.json();
-      return Array.isArray(data.value) ? data.value : [];
-    } catch (e) { return null; }
+      return Array.isArray(data.value) ? data.value : local;
+    } catch (e) { return local; }
   },
 
   async saveProfile(account: any): Promise<void> {
-    if (isConfigured) {
-      const payload = {
-        profile: account.profile,
-        username: account.profile.username,
-        displayName: account.profile.displayName,
-        bio: account.profile.bio,
-        avatar: account.profile.avatar,
-        email: account.email,
-        password: account.password || '',
-        followingMap: account.followingMap || {},
-        isVerified: !!account.profile.isVerified,
-        isAdmin: !!account.profile.isAdmin,
-        followers: account.profile.followers || 0,
-        following: account.profile.following || 0,
-        likes: account.profile.likes || 0,
-        notifications: account.profile.notifications || [],
-        repostedVideoIds: account.profile.repostedVideoIds || []
-      };
-      
-      fetch(`${convexUrl}/saveProfile`, {
-        method: 'POST',
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      }).catch(e => console.error("Cloud Save Profile Error", e));
-    }
-    
+    // 1. Persistência Local Imediata
     const current = JSON.parse(localStorage.getItem(PROFILES_STORAGE_KEY) || '[]');
-    const updated = [account, ...current.filter((a: any) => (a.profile?.username || a.username) !== (account.profile?.username || account.username))];
+    const username = account.profile?.username || account.username;
+    const updated = [account, ...current.filter((a: any) => (a.profile?.username || a.username) !== username)];
     localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(updated));
+
+    // 2. Persistência Cloud
+    if (isConfigured) {
+      try {
+        // Formato esperado pelo convex/profiles.ts
+        const payload = {
+          profile: account.profile,
+          email: account.email || account.profile.email,
+          password: account.password || '',
+          followingMap: account.followingMap || {}
+        };
+        
+        await fetch(`${convexUrl}/saveProfile`, {
+          method: 'POST',
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+      } catch (e) { console.error("Cloud Error (Profile):", e); }
+    }
   },
 
   async uploadFile(bucket: 'videos' | 'avatars', file: File | Blob, path: string): Promise<string | null> {
+    // Se for avatar e estiver offline, usamos Base64 para persistir no LocalStorage
+    if (bucket === 'avatars' && !isConfigured) {
+      return await fileToBase64(file);
+    }
+
     if (!isConfigured) return URL.createObjectURL(file);
+
     try {
       const response = await fetch(`${convexUrl}/api/mutation/media/generateUploadUrl`, { method: "POST" });
       const { value: uploadUrl } = await response.json();
       const result = await fetch(uploadUrl, { method: "POST", body: file });
       const { storageId } = await result.json();
+      
       const getUrlResponse = await fetch(`${convexUrl}/api/query/media/getPublicUrl`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -96,6 +114,8 @@ export const databaseService = {
       });
       const { value: url } = await getUrlResponse.json();
       return url;
-    } catch (e) { return URL.createObjectURL(file); }
+    } catch (e) { 
+      return bucket === 'avatars' ? await fileToBase64(file) : URL.createObjectURL(file); 
+    }
   }
 };
