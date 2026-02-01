@@ -1,6 +1,5 @@
 
 import { httpRouter } from "./server";
-import { api } from "./_generated/api";
 import { httpAction } from "./server";
 
 const http = httpRouter();
