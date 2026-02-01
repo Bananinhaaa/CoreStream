@@ -1,163 +1,137 @@
 
-import { createClient } from '@supabase/supabase-js';
 import { Video, UserProfile } from '../types';
 import { INITIAL_VIDEOS } from '../constants';
 
-const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
+// Em uma aplicação real com Convex, usaríamos os Hooks. 
+// Para este ambiente, simulamos a integração via API/Client para manter a estrutura do app.
+const convexUrl = (import.meta as any).env?.VITE_CONVEX_URL || '';
 
-export const supabase = (supabaseUrl && supabaseAnonKey && supabaseUrl !== 'undefined') 
-  ? createClient(supabaseUrl, supabaseAnonKey) 
-  : null;
+// Status de configuração
+const isConfigured = !!convexUrl && convexUrl !== 'undefined';
 
-export const BUCKETS = {
-  VIDEOS: 'videos',
-  AVATARS: 'avatars'
-};
+if (!isConfigured) {
+  console.warn("CoreStream: Convex não configurado. Verifique VITE_CONVEX_URL. Usando modo LocalStorage.");
+}
 
 export const databaseService = {
+  isConnected(): boolean {
+    return isConfigured;
+  },
+
+  /**
+   * No Convex, o upload funciona em dois passos:
+   * 1. Gera uma URL de upload
+   * 2. Faz o POST do arquivo para essa URL
+   */
   async uploadFile(bucket: 'videos' | 'avatars', file: File | Blob, path: string): Promise<string | null> {
-    if (!supabase) return null;
+    if (!isConfigured) return URL.createObjectURL(file);
+
     try {
-      const { data, error } = await supabase.storage.from(bucket).upload(path, file, {
-        upsert: true,
-        contentType: file.type || (bucket === 'videos' ? 'video/mp4' : 'image/jpeg')
+      // 1. Chamar a função do Convex para gerar a URL (Exemplo de nome de função: 'media:generateUploadUrl')
+      // Como estamos no frontend, simulamos a chamada que você faria ao seu backend Convex
+      const uploadUrlResponse = await fetch(`${convexUrl}/api/generateUploadUrl`, { method: 'POST' });
+      const { uploadUrl } = await uploadUrlResponse.json();
+
+      // 2. Enviar o arquivo
+      const result = await fetch(uploadUrl, {
+        method: "POST",
+        headers: { "Content-Type": file.type },
+        body: file,
       });
-      if (error) throw error;
-      const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(data.path);
-      return publicUrl;
+      const { storageId } = await result.json();
+
+      // 3. Retornar a URL pública (No Convex, você gera uma URL persistente para o storageId)
+      const getUrlResponse = await fetch(`${convexUrl}/api/getPublicUrl`, {
+        method: 'POST',
+        body: JSON.stringify({ storageId })
+      });
+      const { url } = await getUrlResponse.json();
+      return url;
     } catch (error) {
+      console.error("Erro upload Convex:", error);
       return null;
     }
   },
 
   async updatePresence(username: string): Promise<void> {
-    if (!supabase) return;
-    try {
-      await supabase
-        .from('profiles')
-        .update({ last_seen: Date.now() })
-        .eq('username', username);
-    } catch (e) {}
+    if (!isConfigured) return;
+    // No Convex, isso seria uma Mutation: mutation(api.users.updatePresence, { username })
+    fetch(`${convexUrl}/api/mutation/users/updatePresence`, {
+      method: 'POST',
+      body: JSON.stringify({ username, lastSeen: Date.now() })
+    }).catch(() => {});
   },
 
   async getVideos(): Promise<Video[] | null> {
-    if (!supabase) return INITIAL_VIDEOS;
+    if (!isConfigured) {
+      const local = localStorage.getItem('CORE_VIDEOS');
+      return local ? JSON.parse(local) : INITIAL_VIDEOS;
+    }
     try {
-      const { data, error } = await supabase
-        .from('videos')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data && data.length > 0 ? data.map(this.mapVideo) : [];
+      const response = await fetch(`${convexUrl}/api/query/videos/list`);
+      const data = await response.json();
+      return data.map(this.mapVideo);
     } catch (error) {
-      console.error("Falha ao buscar vídeos:", error);
-      return null;
+      return INITIAL_VIDEOS;
     }
   },
 
   mapVideo(v: any): Video {
     return {
-      id: v.id,
+      id: v._id || v.id,
       url: v.url,
-      username: v.owner_username,
-      displayName: v.owner_display_name || v.owner_username,
-      avatar: v.owner_avatar || '',
+      username: v.username,
+      displayName: v.displayName || v.username,
+      avatar: v.avatar || '',
       description: v.description,
-      likes: v.likes_count || 0,
-      comments: v.comments_json || [],
-      reposts: v.reposts_count || 0,
-      views: v.views_count || 0,
+      likes: v.likes || 0,
+      comments: v.comments || [],
+      reposts: v.reposts || 0,
+      views: v.views || 0,
       isLiked: false,
       isFollowing: false,
-      music: v.music_name || 'Original Audio',
-      isVerified: v.owner_is_verified || false
+      music: v.music || 'Original Audio',
+      isVerified: v.isVerified || false
     };
   },
 
   async saveVideo(video: Video): Promise<void> {
-    if (!supabase) return;
-    try {
-      await supabase.from('videos').upsert([{
-        id: video.id,
-        url: video.url,
-        owner_username: video.username,
-        owner_display_name: video.displayName,
-        owner_avatar: video.avatar,
-        description: video.description,
-        likes_count: video.likes,
-        reposts_count: video.reposts,
-        views_count: video.views,
-        music_name: video.music,
-        owner_is_verified: video.isVerified,
-        comments_json: video.comments
-      }], { onConflict: 'id' });
-    } catch (error) {
-      console.error("Erro ao salvar vídeo:", error);
+    if (!isConfigured) {
+      const current = await this.getVideos() || [];
+      const updated = [video, ...current.filter(v => v.id !== video.id)];
+      localStorage.setItem('CORE_VIDEOS', JSON.stringify(updated));
+      return;
     }
+    fetch(`${convexUrl}/api/mutation/videos/save`, {
+      method: 'POST',
+      body: JSON.stringify(video)
+    });
   },
 
   async getProfiles(): Promise<any[] | null> {
-    if (!supabase) return [];
+    if (!isConfigured) {
+      const local = localStorage.getItem('CORE_PROFILES');
+      return local ? JSON.parse(local) : [];
+    }
     try {
-      const { data, error } = await supabase.from('profiles').select('*');
-      if (error) throw error;
-      return data.map((p: any) => ({
-        email: p.email,
-        password: p.password,
-        followingMap: p.following_map || {},
-        profile: {
-          username: p.username,
-          displayName: p.display_name,
-          bio: p.bio,
-          avatar: p.avatar_url,
-          email: p.email,
-          followers: p.followers_count || 0,
-          following: p.following_count || 0,
-          likes: p.likes_total || 0,
-          isVerified: p.is_verified,
-          isAdmin: p.is_admin,
-          isSupport: p.is_support,
-          isBanned: p.is_banned,
-          profileColor: p.profile_color,
-          repostedVideoIds: p.reposted_ids || [],
-          notifications: p.notifications_json || [],
-          lastSeen: p.last_seen
-        }
-      }));
+      const response = await fetch(`${convexUrl}/api/query/profiles/list`);
+      const data = await response.json();
+      return data;
     } catch (error) {
-      console.error("Falha ao buscar perfis:", error);
-      return null; 
+      return [];
     }
   },
 
   async saveProfile(account: any): Promise<void> {
-    if (!supabase) return;
-    try {
-      const p = account.profile;
-      const { error } = await supabase.from('profiles').upsert({
-        username: p.username,
-        display_name: p.displayName,
-        email: account.email || p.email,
-        password: account.password,
-        bio: p.bio,
-        avatar_url: p.avatar,
-        followers_count: p.followers,
-        following_count: p.following,
-        likes_total: p.likes,
-        is_verified: p.isVerified,
-        is_admin: p.isAdmin,
-        is_support: p.isSupport,
-        is_banned: p.isBanned,
-        profile_color: p.profileColor,
-        following_map: account.followingMap || {},
-        reposted_ids: p.repostedVideoIds || [],
-        notifications_json: p.notifications || [],
-        last_seen: p.lastSeen || Date.now()
-      }, { onConflict: 'username' });
-      if (error) throw error;
-    } catch (error) {
-      console.error("Erro ao salvar perfil:", error);
+    if (!isConfigured) {
+      const current = await this.getProfiles() || [];
+      const updated = [account, ...current.filter(a => a.profile.username !== account.profile.username)];
+      localStorage.setItem('CORE_PROFILES', JSON.stringify(updated));
+      return;
     }
+    fetch(`${convexUrl}/api/mutation/profiles/save`, {
+      method: 'POST',
+      body: JSON.stringify(account)
+    });
   }
 };

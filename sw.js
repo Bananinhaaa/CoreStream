@@ -1,25 +1,11 @@
 
-const CACHE_NAME = 'corestream-v4';
-const STATIC_ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/favicon.svg',
-  'https://cdn.tailwindcss.com'
-];
+const CACHE_NAME = 'corestream-v5';
 
-// Instalação: Cacheia o App Shell (essencial para PWA)
+// Estratégia de Cache: Network First para garantir dados novos, fallbacks para offline.
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      console.log('CoreStream: Cacheando App Shell');
-      return cache.addAll(STATIC_ASSETS);
-    })
-  );
   self.skipWaiting();
 });
 
-// Ativação: Limpa caches antigos
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
@@ -31,46 +17,38 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Interceptação de requisições
 self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
+  const request = event.request;
+  const url = new URL(request.url);
 
-  // Ignora chamadas de API externas e vídeos pesados para evitar erros de cache
+  // Não cacheia vídeos nem chamadas de API externas
   if (
-    url.hostname.includes('googleapis') || 
-    url.hostname.includes('google') || 
-    url.hostname.includes('gstatic') ||
+    request.method !== 'GET' ||
     url.pathname.endsWith('.mp4') ||
-    url.pathname.includes('/api/')
+    url.hostname.includes('google') ||
+    url.hostname.includes('supabase')
   ) {
     return;
   }
 
-  // ESTRATÉGIA CRÍTICA PARA PWA NO IOS: 
-  // Se for uma navegação (abrir o app ou dar refresh), serve o index.html do cache.
-  if (event.request.mode === 'navigate') {
-    event.respondWith(
-      caches.match('/index.html').then((response) => {
-        return response || fetch(event.request);
-      })
-    );
-    return;
-  }
-
-  // Para outros arquivos (scripts, estilos, imagens), usa Stale-While-Revalidate
+  // Network First, fallback to cache
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      const fetchPromise = fetch(event.request).then((networkResponse) => {
-        if (networkResponse && networkResponse.status === 200 && event.request.method === 'GET') {
-          const responseToCache = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseToCache);
-          });
+    fetch(request)
+      .then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200) {
+          const cacheCopy = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, cacheCopy));
         }
         return networkResponse;
-      }).catch(() => cachedResponse);
-
-      return cachedResponse || fetchPromise;
-    })
+      })
+      .catch(() => {
+        return caches.match(request).then((cachedResponse) => {
+          if (cachedResponse) return cachedResponse;
+          // Se for uma navegação e não tiver cache, serve o index
+          if (request.mode === 'navigate') {
+            return caches.match('/index.html');
+          }
+        });
+      })
   );
 });
