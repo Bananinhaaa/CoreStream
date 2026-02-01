@@ -5,12 +5,6 @@ import { INITIAL_VIDEOS } from '../constants';
 const convexUrl = (import.meta as any).env?.VITE_CONVEX_URL || '';
 const isConfigured = !!convexUrl && convexUrl !== 'undefined' && convexUrl.includes('.cloud');
 
-if (!isConfigured) {
-  console.warn("CORE: Backend Convex não detectado. Usando modo temporário.");
-} else {
-  console.log("CORE: Conectado ao Cloud em " + convexUrl);
-}
-
 export const databaseService = {
   getConvexUrl(): string {
     return convexUrl;
@@ -22,34 +16,32 @@ export const databaseService = {
 
   async uploadFile(bucket: 'videos' | 'avatars', file: File | Blob, path: string): Promise<string | null> {
     if (!isConfigured) {
-      console.log("CORE: Salvando arquivo localmente (modo offline).");
       return URL.createObjectURL(file);
     }
     
     try {
       // 1. Gera URL de upload
       const response = await fetch(`${convexUrl}/api/mutation/media/generateUploadUrl`, { method: "POST" });
-      if (!response.ok) throw new Error("Falha ao gerar URL de upload");
+      if (!response.ok) throw new Error("Upload URL failed");
       const { value: uploadUrl } = await response.json();
       
-      // 2. Faz o upload do arquivo real
+      // 2. Upload binário
       const result = await fetch(uploadUrl, { method: "POST", body: file });
-      if (!result.ok) throw new Error("Falha no upload do arquivo");
+      if (!result.ok) throw new Error("File upload failed");
       const { storageId } = await result.json();
       
-      // 3. Pega a URL pública permanente
+      // 3. Obtém URL pública permanente
       const getUrlResponse = await fetch(`${convexUrl}/api/query/media/getPublicUrl`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ args: { storageId } })
       });
-      if (!getUrlResponse.ok) throw new Error("Falha ao obter URL pública");
+      if (!getUrlResponse.ok) throw new Error("Public URL failed");
       const { value: url } = await getUrlResponse.json();
       
       return url;
     } catch (e) { 
-      console.error("Erro no upload para Cloud:", e);
-      // Fallback para blob local para não travar a experiência do usuário
+      console.error("Cloud Upload Error:", e);
       return URL.createObjectURL(file); 
     }
   },
@@ -67,19 +59,12 @@ export const databaseService = {
   async getVideos(): Promise<Video[] | null> {
     const local = localStorage.getItem('CORE_VIDEOS');
     const localData = local ? JSON.parse(local) : INITIAL_VIDEOS;
-    
     if (!isConfigured) return localData;
-    
     try {
-      const response = await fetch(`${convexUrl}/listVideos`, {
-        method: 'POST',
-        headers: { "Content-Type": "application/json" }
-      });
+      const response = await fetch(`${convexUrl}/listVideos`, { method: 'POST' });
       const data = await response.json();
       return data.value || localData;
-    } catch (e) { 
-      return localData; 
-    }
+    } catch (e) { return localData; }
   },
 
   async saveVideo(video: Video): Promise<void> {
@@ -90,7 +75,6 @@ export const databaseService = {
         body: JSON.stringify(video)
       });
     }
-    // Sempre atualiza o local para velocidade
     const current = JSON.parse(localStorage.getItem('CORE_VIDEOS') || '[]');
     const updated = [video, ...current.filter((v: any) => v.id !== video.id)];
     localStorage.setItem('CORE_VIDEOS', JSON.stringify(updated));
@@ -99,19 +83,12 @@ export const databaseService = {
   async getProfiles(): Promise<any[] | null> {
     const local = localStorage.getItem('CORE_PROFILES');
     const localData = local ? JSON.parse(local) : [];
-
     if (!isConfigured) return localData;
-
     try {
-      const response = await fetch(`${convexUrl}/listProfiles`, {
-        method: 'POST',
-        headers: { "Content-Type": "application/json" }
-      });
+      const response = await fetch(`${convexUrl}/listProfiles`, { method: 'POST' });
       const data = await response.json();
       return data.value || localData;
-    } catch (e) { 
-      return localData; 
-    }
+    } catch (e) { return localData; }
   },
 
   async saveProfile(account: any): Promise<void> {
@@ -122,7 +99,6 @@ export const databaseService = {
         body: JSON.stringify(account)
       });
     }
-    // Atualiza local
     const current = JSON.parse(localStorage.getItem('CORE_PROFILES') || '[]');
     const updated = [account, ...current.filter((a: any) => {
       const uname = a.profile ? a.profile.username : a.username;

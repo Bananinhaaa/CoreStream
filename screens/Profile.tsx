@@ -30,8 +30,6 @@ interface ProfileProps {
   onLikeComment: (vId: string, cId: string) => void;
   isMuted: boolean;
   setIsMuted: (val: boolean) => void;
-  installPrompt?: any;
-  onInstallApp?: () => void;
 }
 
 const USERNAME_COOLDOWN = 30 * 24 * 60 * 60 * 1000;
@@ -42,16 +40,9 @@ const Profile: React.FC<ProfileProps> = ({
   onFollow, onLike, onRepost, onAddComment, 
   onDeleteComment, onDeleteVideo,
   followingMap, onNavigateToProfile, onSwitchAccount, onOpenAdmin, onOpenSupport,
-  onLikeComment, isMuted, setIsMuted, allAccountsData,
-  installPrompt, onInstallApp
+  onLikeComment, isMuted, setIsMuted, allAccountsData
 }) => {
   if (!user) return null;
-
-  useEffect(() => {
-    if (user.isBanned && !isOwnProfile) {
-      alert("Esta conta foi suspensa por violar as diretrizes do Core.");
-    }
-  }, [user, isOwnProfile]);
 
   const [activeTab, setActiveTab] = useState<'videos' | 'reposts'>('videos');
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
@@ -64,34 +55,33 @@ const Profile: React.FC<ProfileProps> = ({
   
   const photoInputRef = useRef<HTMLInputElement>(null);
 
-  const getDaysRemaining = (lastChange: number | undefined, cooldown: number) => {
-    if (!lastChange) return 0;
-    const remaining = cooldown - (Date.now() - lastChange);
-    return Math.ceil(remaining / (24 * 60 * 60 * 1000));
-  };
+  const usernameDays = useMemo(() => {
+    if (!user.lastUsernameChange) return 0;
+    const rem = USERNAME_COOLDOWN - (Date.now() - user.lastUsernameChange);
+    return Math.max(0, Math.ceil(rem / (24 * 60 * 60 * 1000)));
+  }, [user.lastUsernameChange]);
 
-  const usernameDays = getDaysRemaining(user.lastUsernameChange, USERNAME_COOLDOWN);
-  const displayDays = getDaysRemaining(user.lastDisplayNameChange, DISPLAYNAME_COOLDOWN);
+  const displayDays = useMemo(() => {
+    if (!user.lastDisplayNameChange) return 0;
+    const rem = DISPLAYNAME_COOLDOWN - (Date.now() - user.lastDisplayNameChange);
+    return Math.max(0, Math.ceil(rem / (24 * 60 * 60 * 1000)));
+  }, [user.lastDisplayNameChange]);
 
   const canChangeUsername = user.isAdmin || usernameDays <= 0;
   const canChangeDisplayName = user.isAdmin || displayDays <= 0;
 
-  const followersList = useMemo(() => {
-    return allAccountsData
-      .filter(acc => acc.followingMap && acc.followingMap[user.username])
-      .map(acc => acc.profile);
-  }, [allAccountsData, user.username]);
+  const followersList = useMemo(() => 
+    allAccountsData.filter(acc => acc.followingMap?.[user.username]).map(acc => acc.profile),
+    [allAccountsData, user.username]
+  );
 
   const followingList = useMemo(() => {
-    const targetAcc = allAccountsData.find(acc => acc.profile.username === user.username);
-    const fMap = targetAcc?.followingMap || {};
-    return allAccountsData
-      .filter(acc => fMap[acc.profile.username])
-      .map(acc => acc.profile);
+    const target = allAccountsData.find(acc => acc.profile.username === user.username);
+    const map = target?.followingMap || {};
+    return allAccountsData.filter(acc => map[acc.profile.username]).map(acc => acc.profile);
   }, [allAccountsData, user.username]);
 
-  const validate = (val: string) => /^[a-zA-Z0-9]{3,20}$/.test(val);
-
+  // Compressor de Imagem em Tempo Real
   const optimizeImage = (file: File): Promise<Blob> => {
     return new Promise((resolve) => {
       const reader = new FileReader();
@@ -99,30 +89,14 @@ const Profile: React.FC<ProfileProps> = ({
         const img = new Image();
         img.onload = () => {
           const canvas = document.createElement('canvas');
-          let width = img.width;
-          let height = img.height;
-          const maxSide = 400;
-
-          if (width > height) {
-            if (width > maxSide) {
-              height *= maxSide / width;
-              width = maxSide;
-            }
-          } else {
-            if (height > maxSide) {
-              width *= maxSide / height;
-              height = maxSide;
-            }
-          }
-
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          ctx?.drawImage(img, 0, 0, width, height);
-          
-          canvas.toBlob((blob) => {
-            resolve(blob || file);
-          }, 'image/jpeg', 0.8);
+          const max = 400;
+          let w = img.width;
+          let h = img.height;
+          if (w > h) { if (w > max) { h *= max/w; w = max; } }
+          else { if (h > max) { w *= max/h; h = max; } }
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d')?.drawImage(img, 0, 0, w, h);
+          canvas.toBlob(b => resolve(b || file), 'image/jpeg', 0.8);
         };
         img.src = e.target?.result as string;
       };
@@ -130,203 +104,203 @@ const Profile: React.FC<ProfileProps> = ({
     });
   };
 
-  const handleSaveProfile = async () => {
-    if (isUploadingPhoto) return;
-    
-    setError('');
-    setIsSaving(true);
-    
-    if (editForm.username !== user.username && !canChangeUsername) {
-      setError(`Username bloqueado por mais ${usernameDays} dias.`);
-      setIsSaving(false);
-      return;
-    }
-    if (editForm.displayName !== user.displayName && !canChangeDisplayName) {
-      setError(`Nome bloqueado por mais ${displayDays} dias.`);
-      setIsSaving(false);
-      return;
-    }
-
-    if (!validate(editForm.username)) {
-      setError('Username: 3-20 letras ou números.');
-      setIsSaving(false);
-      return;
-    }
-
-    // Só bloqueia 'blob:' se o backend estiver configurado. 
-    // No modo offline, 'blob:' é o comportamento padrão do databaseService.
-    const isCloud = databaseService.isConnected();
-    if (isCloud && editForm.avatar?.startsWith('blob:')) {
-      setError('Aguarde o upload para a nuvem terminar.');
-      setIsSaving(false);
-      return;
-    }
-
-    const finalUpdates: any = { ...editForm };
-    if (editForm.username !== user.username) finalUpdates.lastUsernameChange = Date.now();
-    if (editForm.displayName !== user.displayName) finalUpdates.lastDisplayNameChange = Date.now();
-
-    onUpdateProfile(user.username, finalUpdates);
-    setIsEditing(false);
-    setIsSaving(false);
-  };
-
   const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      setIsUploadingPhoto(true);
-      setError('');
+    if (!file) return;
+
+    setIsUploadingPhoto(true);
+    setError('');
+    
+    // Preview Instantâneo (UX)
+    const previewUrl = URL.createObjectURL(file);
+    setEditForm(prev => ({ ...prev, avatar: previewUrl }));
+
+    try {
+      const optimized = await optimizeImage(file);
+      const fileName = `avatar_${user.username}_${Date.now()}.jpg`;
+      const cloudUrl = await databaseService.uploadFile('avatars', optimized, fileName);
       
-      const tempUrl = URL.createObjectURL(file);
-      setEditForm(prev => ({ ...prev, avatar: tempUrl }));
-      
-      try {
-        const optimizedBlob = await optimizeImage(file);
-        const fileName = `avatar_${user.username}_${Date.now()}.jpg`;
-        const uploadedUrl = await databaseService.uploadFile('avatars', optimizedBlob, fileName);
-        
-        if (uploadedUrl) {
-          setEditForm(prev => ({ ...prev, avatar: uploadedUrl }));
-        }
-      } catch (err) {
-        console.error("Erro no processamento da imagem:", err);
-        setError('Erro ao processar imagem.');
-      } finally {
-        setIsUploadingPhoto(false);
+      if (cloudUrl) {
+        setEditForm(prev => ({ ...prev, avatar: cloudUrl }));
       }
+    } catch (err) {
+      setError('Erro ao processar imagem.');
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    if (isUploadingPhoto) return;
+    setIsSaving(true);
+    setError('');
+
+    const isCloud = databaseService.isConnected();
+    if (isCloud && editForm.avatar?.startsWith('blob:')) {
+      setError('Aguarde a sincronização da foto...');
+      setIsSaving(false);
+      return;
+    }
+
+    const updates: any = { ...editForm };
+    if (editForm.username !== user.username) updates.lastUsernameChange = Date.now();
+    if (editForm.displayName !== user.displayName) updates.lastDisplayNameChange = Date.now();
+
+    try {
+      await onUpdateProfile(user.username, updates);
+      setIsEditing(false);
+    } catch (err) {
+      setError('Erro ao salvar perfil.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
   const myVideos = useMemo(() => videos.filter(v => v.username === user.username), [videos, user.username]);
   const repostedVideos = useMemo(() => videos.filter(v => user.repostedVideoIds?.includes(v.id)), [videos, user.repostedVideoIds]);
 
-  const backgroundStyle = {
+  const bgStyle = {
     background: user.profileColor && user.profileColor !== '#000000' 
-      ? `linear-gradient(to bottom, ${user.profileColor} 0%, #000 500px)` 
+      ? `linear-gradient(to bottom, ${user.profileColor} 0%, #000 600px)` 
       : '#000'
   };
 
   return (
-    <div className={`h-full overflow-y-auto no-scrollbar pb-24 text-white ${user.isBanned && !isOwnProfile ? 'opacity-30 pointer-events-none' : ''}`} style={backgroundStyle}>
-      <div className="h-32 bg-gradient-to-b from-black/40 to-transparent w-full" />
-      <div className="px-6 flex flex-col items-center">
-        <div className="absolute top-10 right-6 flex gap-2">
-          {isOwnProfile && currentUser.isAdmin && (
-            <>
-              <button onClick={onOpenAdmin} className="p-3 bg-white text-black rounded-2xl font-black text-[9px] uppercase tracking-widest">ADMIN</button>
-              <button onClick={onOpenSupport} className="p-3 bg-indigo-600 text-white rounded-2xl font-black text-[9px] uppercase tracking-widest">SUPORTE</button>
-            </>
-          )}
-          {isOwnProfile && <button onClick={onSwitchAccount} className="p-3 bg-white/10 rounded-2xl font-black text-[9px] uppercase tracking-widest border border-white/10">Contas</button>}
+    <div className={`h-full overflow-y-auto no-scrollbar pb-32 text-white animate-view ${user.isBanned && !isOwnProfile ? 'opacity-30 pointer-events-none' : ''}`} style={bgStyle}>
+      <div className="h-44 bg-gradient-to-b from-black/60 to-transparent w-full" />
+      
+      <div className="px-6 -mt-20 flex flex-col items-center relative">
+        {isOwnProfile && (
+          <div className="absolute -top-10 right-6 flex gap-2">
+            {currentUser.isAdmin && (
+              <button onClick={onOpenAdmin} className="p-3 bg-white text-black rounded-2xl font-black text-[9px] uppercase tracking-widest shadow-2xl">ADMIN</button>
+            )}
+            <button onClick={onSwitchAccount} className="p-3 bg-white/10 backdrop-blur-xl rounded-2xl font-black text-[9px] uppercase tracking-widest border border-white/10">Contas</button>
+          </div>
+        )}
+
+        <div className="w-32 h-32 rounded-[2.5rem] bg-black p-1.5 border-2 border-white/10 mb-6 overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.5)] transform hover:scale-105 transition-transform duration-500">
+           {user.avatar ? (
+             <img src={user.avatar} className="w-full h-full object-cover rounded-[2.2rem]" />
+           ) : (
+             <div className="w-full h-full flex items-center justify-center text-4xl font-black italic bg-zinc-900 rounded-[2.2rem]">
+               {user.displayName.charAt(0)}
+             </div>
+           )}
         </div>
 
-        <div className="w-28 h-28 rounded-[2rem] bg-black p-1 border border-white/10 mb-6 overflow-hidden shadow-2xl">
-           {user.avatar ? <img src={user.avatar} className="w-full h-full object-cover rounded-[1.8rem]" /> : <div className="w-full h-full flex items-center justify-center text-3xl font-black italic bg-zinc-900">{user.displayName.charAt(0)}</div>}
+        <div className="text-center mb-8">
+          <h2 className="text-3xl font-black italic flex items-center gap-2 justify-center tracking-tighter">
+            {user.displayName} {user.isVerified && <VerifiedBadge size="22" />}
+          </h2>
+          <p className="text-[11px] text-gray-500 font-black uppercase tracking-[0.3em] mt-1 opacity-60">@{user.username}</p>
         </div>
 
-        <div className="text-center mb-6">
-          <h2 className="text-2xl font-black italic flex items-center gap-2 justify-center">{user.displayName} {user.isVerified && <VerifiedBadge size="18" />}</h2>
-          <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1">@{user.username}</p>
-        </div>
-
-        <div className="flex gap-10 mb-8">
-           <div className="text-center cursor-pointer" onClick={() => setListDrawer({ type: 'followers', isOpen: true })}>
-             <p className="font-black text-lg italic">{formatNumber(user.followers || 0)}</p>
-             <p className="text-[7px] text-gray-500 uppercase font-black">Seguidores</p>
+        <div className="flex gap-12 mb-10 bg-white/5 backdrop-blur-md px-8 py-5 rounded-[2.5rem] border border-white/5">
+           <div className="text-center cursor-pointer active:scale-95 transition-transform" onClick={() => setListDrawer({ type: 'followers', isOpen: true })}>
+             <p className="font-black text-xl italic">{formatNumber(user.followers || 0)}</p>
+             <p className="text-[8px] text-gray-500 uppercase font-black tracking-widest">Seguidores</p>
            </div>
-           <div className="text-center cursor-pointer" onClick={() => setListDrawer({ type: 'following', isOpen: true })}>
-             <p className="font-black text-lg italic">{formatNumber(user.following || 0)}</p>
-             <p className="text-[7px] text-gray-500 uppercase font-black">Seguindo</p>
+           <div className="text-center cursor-pointer active:scale-95 transition-transform" onClick={() => setListDrawer({ type: 'following', isOpen: true })}>
+             <p className="font-black text-xl italic">{formatNumber(user.following || 0)}</p>
+             <p className="text-[8px] text-gray-500 uppercase font-black tracking-widest">Seguindo</p>
            </div>
            <div className="text-center">
-             <p className="font-black text-lg italic">{formatNumber(user.likes || 0)}</p>
-             <p className="text-[7px] text-gray-500 uppercase font-black">Likes</p>
+             <p className="font-black text-xl italic">{formatNumber(user.likes || 0)}</p>
+             <p className="text-[8px] text-gray-500 uppercase font-black tracking-widest">Likes</p>
            </div>
         </div>
 
-        <div className="text-xs text-gray-400 text-center mb-8 max-w-xs whitespace-pre-wrap leading-relaxed italic">
-          {user.bio || "Explorando o CoreStream..."}
-        </div>
+        <p className="text-sm text-gray-300 text-center mb-10 max-w-xs italic leading-relaxed font-medium">
+          {user.bio || "Este scripter ainda não definiu um manifesto."}
+        </p>
 
-        <div className="w-full max-w-[240px] space-y-3">
+        <div className="w-full max-w-[280px]">
           {isOwnProfile ? (
-            <button onClick={() => { setIsEditing(true); setEditForm({...user}); }} className="w-full bg-white text-black py-4 rounded-2xl text-[9px] font-black uppercase tracking-widest shadow-xl active:scale-95">Editar Perfil</button>
+            <button onClick={() => { setIsEditing(true); setEditForm({...user}); }} className="w-full bg-white text-black py-5 rounded-3xl text-[10px] font-black uppercase tracking-[0.2em] shadow-[0_10px_30px_rgba(255,255,255,0.2)] active:scale-95 transition-all">Editar Perfil</button>
           ) : (
-            <button onClick={() => onFollow(user.username)} className={`w-full py-4 rounded-2xl text-[9px] font-black uppercase tracking-widest ${followingMap[user.username] ? 'bg-white/10 text-white' : 'bg-white text-black'}`}>{followingMap[user.username] ? 'Seguindo' : 'Seguir'}</button>
+            <button onClick={() => onFollow(user.username)} className={`w-full py-5 rounded-3xl text-[10px] font-black uppercase tracking-[0.2em] transition-all active:scale-95 ${followingMap[user.username] ? 'bg-white/10 text-white border border-white/20' : 'bg-white text-black shadow-xl'}`}>
+              {followingMap[user.username] ? 'Seguindo' : 'Seguir'}
+            </button>
           )}
         </div>
 
-        <div className="w-full flex border-b border-white/10 mt-10">
-          <button onClick={() => setActiveTab('videos')} className={`flex-1 py-4 text-[9px] font-black uppercase ${activeTab === 'videos' ? 'border-b-2 border-white text-white' : 'text-gray-500'}`}>PULSOS</button>
-          <button onClick={() => setActiveTab('reposts')} className={`flex-1 py-4 text-[9px] font-black uppercase ${activeTab === 'reposts' ? 'border-b-2 border-white text-white' : 'text-gray-500'}`}>REPOSTS</button>
+        <div className="w-full flex border-b border-white/5 mt-12 mb-6">
+          <button onClick={() => setActiveTab('videos')} className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'videos' ? 'border-b-2 border-white text-white' : 'text-gray-600'}`}>Meus Pulsos</button>
+          <button onClick={() => setActiveTab('reposts')} className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'reposts' ? 'border-b-2 border-white text-white' : 'text-gray-600'}`}>Republicados</button>
         </div>
 
-        <div className="grid grid-cols-3 gap-1 w-full mt-4">
+        <div className="grid grid-cols-3 gap-1.5 w-full">
           {(activeTab === 'videos' ? myVideos : repostedVideos).map(v => (
-            <div key={v.id} onClick={() => setSelectedVideo(v)} className="aspect-[3/4] bg-zinc-900 overflow-hidden relative group">
-              <video src={v.url} className="w-full h-full object-cover" />
-              {(isOwnProfile || currentUser.isAdmin) && <button onClick={(e) => { e.stopPropagation(); onDeleteVideo(v.id); }} className="absolute top-2 right-2 p-1.5 bg-black/60 rounded-lg text-rose-500 opacity-0 group-hover:opacity-100"><TrashIcon size="12" /></button>}
+            <div key={v.id} onClick={() => setSelectedVideo(v)} className="aspect-[3/4] bg-zinc-900 overflow-hidden relative group rounded-xl border border-white/5 cursor-pointer">
+              <video src={v.url} className="w-full h-full object-cover grayscale-[0.3] group-hover:grayscale-0 transition-all" />
+              <div className="absolute bottom-2 left-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <svg className="w-3 h-3 text-white fill-current" viewBox="0 0 24 24"><path d="M12 21l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.18L12 21z"/></svg>
+                <span className="text-[10px] font-black">{formatNumber(v.likes)}</span>
+              </div>
             </div>
           ))}
+          {(activeTab === 'videos' ? myVideos : repostedVideos).length === 0 && (
+            <div className="col-span-3 py-20 text-center opacity-20 italic text-xs uppercase tracking-widest">Nada por aqui ainda.</div>
+          )}
         </div>
       </div>
 
       {isEditing && (
-        <div className="fixed inset-0 z-[500] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/95 backdrop-blur-xl" onClick={() => setIsEditing(false)} />
-          <div className="relative w-full max-w-lg bg-[#0d0d0d] rounded-[2.5rem] p-8 border border-white/10 max-h-[85vh] overflow-y-auto no-scrollbar">
-            <h3 className="text-xl font-black italic uppercase mb-8">Editar Identidade</h3>
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/90 backdrop-blur-2xl animate-view" onClick={() => !isSaving && setIsEditing(false)} />
+          <div className="relative w-full max-w-lg bg-[#0a0a0a] rounded-[3rem] p-10 border border-white/10 max-h-[85vh] overflow-y-auto no-scrollbar shadow-[0_50px_100px_rgba(0,0,0,0.8)]">
+            <h3 className="text-2xl font-black italic uppercase mb-10 tracking-tighter">Sincronizar Identidade</h3>
             
-            {error && <p className="bg-rose-500/10 text-rose-500 p-3 rounded-xl text-[10px] font-bold uppercase mb-4 text-center border border-rose-500/20">{error}</p>}
+            {error && <p className="bg-rose-500/10 text-rose-500 p-4 rounded-2xl text-[10px] font-black uppercase mb-6 text-center border border-rose-500/20">{error}</p>}
 
-            <div className="space-y-6">
-              <div className="flex flex-col items-center gap-4 mb-4">
-                 <div className="w-24 h-24 rounded-[2rem] bg-white/5 border border-white/10 overflow-hidden relative group cursor-pointer" onClick={() => !isUploadingPhoto && photoInputRef.current?.click()}>
-                    {editForm.avatar ? <img src={editForm.avatar} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center opacity-40">FOTO</div>}
-                    
-                    <div className={`absolute inset-0 bg-black/60 flex items-center justify-center transition-opacity text-[8px] font-black ${isUploadingPhoto ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                      {isUploadingPhoto ? 'PROCESSANDO...' : 'TROCAR'}
+            <div className="space-y-8">
+              <div className="flex flex-col items-center gap-6">
+                 <div className="w-28 h-28 rounded-[2.5rem] bg-white/5 border-2 border-white/10 overflow-hidden relative group cursor-pointer shadow-2xl" onClick={() => !isUploadingPhoto && photoInputRef.current?.click()}>
+                    <img src={editForm.avatar} className={`w-full h-full object-cover transition-all ${isUploadingPhoto ? 'opacity-30 blur-sm' : ''}`} />
+                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <p className="text-[9px] font-black uppercase tracking-widest">{isUploadingPhoto ? '...' : 'Trocar'}</p>
                     </div>
-                    
                     {isUploadingPhoto && (
-                      <div className="absolute bottom-0 left-0 h-1 bg-indigo-500 animate-pulse w-full"></div>
+                      <div className="absolute inset-0 flex items-center justify-center">
+                         <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      </div>
                     )}
                  </div>
                  <input type="file" ref={photoInputRef} className="hidden" accept="image/*" onChange={handlePhotoChange} />
               </div>
 
-              <div className="space-y-2">
-                <label className="text-[8px] font-black text-gray-500 uppercase ml-1">Username</label>
-                <input maxLength={20} type="text" disabled={!canChangeUsername} value={editForm.username} onChange={e => setEditForm({...editForm, username: e.target.value.toLowerCase()})} className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm outline-none disabled:opacity-30" />
-              </div>
+              <div className="grid grid-cols-1 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[9px] font-black text-gray-500 uppercase ml-2 tracking-widest">Handle (@)</label>
+                  <input maxLength={20} type="text" disabled={!canChangeUsername} value={editForm.username} onChange={e => setEditForm({...editForm, username: e.target.value.toLowerCase().trim()})} className="w-full bg-white/5 border border-white/10 rounded-2xl p-5 text-sm outline-none focus:border-white transition-all disabled:opacity-20 font-bold" />
+                </div>
 
-              <div className="space-y-2">
-                <label className="text-[8px] font-black text-gray-600 uppercase ml-1">Nome de Exibição</label>
-                <input maxLength={20} type="text" disabled={!canChangeDisplayName} value={editForm.displayName} onChange={e => setEditForm({...editForm, displayName: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm outline-none disabled:opacity-30" />
-              </div>
+                <div className="space-y-2">
+                  <label className="text-[9px] font-black text-gray-500 uppercase ml-2 tracking-widest">Nome de Pulso</label>
+                  <input maxLength={20} type="text" disabled={!canChangeDisplayName} value={editForm.displayName} onChange={e => setEditForm({...editForm, displayName: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-2xl p-5 text-sm outline-none focus:border-white transition-all disabled:opacity-20 font-bold" />
+                </div>
 
-              <div className="space-y-2">
-                <label className="text-[8px] font-black text-gray-600 uppercase ml-1">Bio</label>
-                <textarea maxLength={200} value={editForm.bio} onChange={e => setEditForm({...editForm, bio: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm outline-none h-32 resize-none" />
+                <div className="space-y-2">
+                  <label className="text-[9px] font-black text-gray-500 uppercase ml-2 tracking-widest">Manifesto (Bio)</label>
+                  <textarea maxLength={200} value={editForm.bio} onChange={e => setEditForm({...editForm, bio: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-2xl p-5 text-sm outline-none h-32 resize-none focus:border-white transition-all font-medium" />
+                </div>
               </div>
             </div>
-            <div className="mt-10 space-y-3">
-              <button 
-                onClick={handleSaveProfile} 
-                disabled={isSaving || isUploadingPhoto} 
-                className="w-full bg-white text-black py-4 rounded-2xl font-black text-[10px] uppercase disabled:opacity-30"
-              >
-                {isSaving ? 'SALVANDO...' : 'SALVAR'}
+
+            <div className="mt-12 space-y-4">
+              <button onClick={handleSaveProfile} disabled={isSaving || isUploadingPhoto} className="w-full bg-white text-black py-5 rounded-[2rem] font-black text-[11px] uppercase tracking-widest shadow-2xl disabled:opacity-30 active:scale-95 transition-all">
+                {isSaving ? 'Sincronizando...' : 'Confirmar Alterações'}
               </button>
-              <button onClick={onLogout} className="w-full border border-rose-500/20 text-rose-500 py-4 rounded-2xl font-black text-[10px] uppercase">SAIR DA CONTA</button>
+              <button onClick={onLogout} className="w-full border border-rose-500/20 text-rose-500/60 hover:text-rose-500 py-5 rounded-[2rem] font-black text-[11px] uppercase tracking-widest transition-all">Desconectar</button>
             </div>
           </div>
         </div>
       )}
 
       {selectedVideo && (
-        <div className="fixed inset-0 z-[600] bg-black">
-          <button onClick={() => setSelectedVideo(null)} className="absolute top-10 left-6 z-[610] bg-white text-black px-5 py-2 rounded-full text-[10px] font-black uppercase">Fechar</button>
+        <div className="fixed inset-0 z-[2000] bg-black animate-view">
+          <button onClick={() => setSelectedVideo(null)} className="absolute top-12 left-6 z-[2010] bg-white/10 backdrop-blur-xl border border-white/10 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest">Voltar</button>
           <VideoPlayer video={selectedVideo} isActive={true} onLike={onLike} onFollow={onFollow} onRepost={onRepost} onNavigateToProfile={onNavigateToProfile} currentUser={currentUser} onAddComment={onAddComment} onDeleteComment={onDeleteComment} onToggleComments={() => {}} onDeleteVideo={onDeleteVideo} isFollowing={!!followingMap[selectedVideo.username]} onLikeComment={onLikeComment} isMuted={isMuted} setIsMuted={setIsMuted} isRepostedByMe={currentUser.repostedVideoIds.includes(selectedVideo.id)} allAccounts={allAccountsData.map(a => a.profile)} />
         </div>
       )}
