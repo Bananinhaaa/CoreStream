@@ -10,9 +10,16 @@ export const list = query({
 });
 
 export const save = mutation({
-  args: v.any(),
+  args: v.object({
+    profile: v.any(),
+    email: v.string(),
+    password: v.optional(v.string()),
+    followingMap: v.optional(v.any()),
+  }),
   handler: async (ctx: any, args: any) => {
     const { profile, email, password, followingMap } = args;
+    if (!profile || !profile.username) return;
+
     const existing = await ctx.db
       .query("profiles")
       .withIndex("by_username", (q: any) => q.eq("username", profile.username))
@@ -21,8 +28,8 @@ export const save = mutation({
     const data = {
       ...profile,
       email,
-      password,
-      followingMap,
+      password: password || '',
+      followingMap: followingMap || {},
     };
 
     if (existing) {
