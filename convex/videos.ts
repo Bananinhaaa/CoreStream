@@ -4,8 +4,7 @@ import { query, mutation } from "./server";
 
 export const list = query({
   args: {},
-  handler: async (ctx) => {
-    // Retorna os vídeos mais recentes primeiro
+  handler: async (ctx: any) => {
     return await ctx.db.query("videos").order("desc").collect();
   },
 });
@@ -26,10 +25,10 @@ export const save = mutation({
     isVerified: v.boolean(),
     storageId: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     const existing = await ctx.db
       .query("videos")
-      .filter((q) => q.eq(q.field("id"), args.id))
+      .filter((q: any) => q.eq(q.field("id"), args.id))
       .first();
 
     if (existing) {

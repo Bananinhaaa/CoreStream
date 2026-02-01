@@ -4,18 +4,18 @@ import { query, mutation } from "./server";
 
 export const list = query({
   args: {},
-  handler: async (ctx) => {
+  handler: async (ctx: any) => {
     return await ctx.db.query("profiles").collect();
   },
 });
 
 export const save = mutation({
   args: v.any(),
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     const { profile, email, password, followingMap } = args;
     const existing = await ctx.db
       .query("profiles")
-      .withIndex("by_username", (q) => q.eq("username", profile.username))
+      .withIndex("by_username", (q: any) => q.eq("username", profile.username))
       .first();
 
     const data = {
@@ -35,10 +35,10 @@ export const save = mutation({
 
 export const updatePresence = mutation({
   args: { username: v.string(), lastSeen: v.number() },
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     const existing = await ctx.db
       .query("profiles")
-      .withIndex("by_username", (q) => q.eq("username", args.username))
+      .withIndex("by_username", (q: any) => q.eq("username", args.username))
       .first();
     if (existing) {
       await ctx.db.patch(existing._id, { lastSeen: args.lastSeen });
