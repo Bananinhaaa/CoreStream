@@ -7,7 +7,7 @@ import { mutation, query } from "./server";
  */
 export const getTrending = query({
   args: { limit: v.number() },
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     return await ctx.db
       .query("videos")
       .order("desc")
@@ -20,10 +20,10 @@ export const getTrending = query({
  */
 export const getPublicProfile = query({
   args: { username: v.string() },
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     return await ctx.db
       .query("profiles")
-      .withIndex("by_username", (q) => q.eq("username", args.username))
+      .withIndex("by_username", (q: any) => q.eq("username", args.username))
       .first();
   },
 });
@@ -33,10 +33,10 @@ export const getPublicProfile = query({
  */
 export const searchVideos = query({
   args: { queryText: v.string() },
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     const term = args.queryText.toLowerCase();
     const allVideos = await ctx.db.query("videos").collect();
-    return allVideos.filter(v => 
+    return allVideos.filter((v: any) => 
       v.description.toLowerCase().includes(term) || 
       v.username.toLowerCase().includes(term)
     );
@@ -52,10 +52,10 @@ export const toggleLike = mutation({
     increment: v.boolean(),
     ownerUsername: v.string() 
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     const video = await ctx.db
       .query("videos")
-      .withIndex("by_videoId", (q) => q.eq("id", args.videoId))
+      .withIndex("by_videoId", (q: any) => q.eq("id", args.videoId))
       .first();
 
     if (video) {
@@ -65,7 +65,7 @@ export const toggleLike = mutation({
 
     const profile = await ctx.db
       .query("profiles")
-      .withIndex("by_username", (q) => q.eq("username", args.ownerUsername))
+      .withIndex("by_username", (q: any) => q.eq("username", args.ownerUsername))
       .first();
 
     if (profile) {
@@ -81,15 +81,15 @@ export const toggleFollow = mutation({
     targetUsername: v.string(),
     isFollowing: v.boolean()
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     const me = await ctx.db
       .query("profiles")
-      .withIndex("by_username", (q) => q.eq("username", args.myUsername))
+      .withIndex("by_username", (q: any) => q.eq("username", args.myUsername))
       .first();
 
     const target = await ctx.db
       .query("profiles")
-      .withIndex("by_username", (q) => q.eq("username", args.targetUsername))
+      .withIndex("by_username", (q: any) => q.eq("username", args.targetUsername))
       .first();
 
     if (!me || !target) return;
@@ -117,10 +117,10 @@ export const addComment = mutation({
     videoId: v.string(),
     comment: v.any(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     const video = await ctx.db
       .query("videos")
-      .withIndex("by_videoId", (q) => q.eq("id", args.videoId))
+      .withIndex("by_videoId", (q: any) => q.eq("id", args.videoId))
       .first();
 
     if (video) {
@@ -135,10 +135,10 @@ export const deleteComment = mutation({
     videoId: v.string(),
     commentId: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     const video = await ctx.db
       .query("videos")
-      .withIndex("by_videoId", (q) => q.eq("id", args.videoId))
+      .withIndex("by_videoId", (q: any) => q.eq("id", args.videoId))
       .first();
 
     if (video) {
@@ -153,15 +153,15 @@ export const repost = mutation({
     username: v.string(),
     videoId: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     const user = await ctx.db
       .query("profiles")
-      .withIndex("by_username", (q) => q.eq("username", args.username))
+      .withIndex("by_username", (q: any) => q.eq("username", args.username))
       .first();
 
     const video = await ctx.db
       .query("videos")
-      .withIndex("by_videoId", (q) => q.eq("id", args.videoId))
+      .withIndex("by_videoId", (q: any) => q.eq("id", args.videoId))
       .first();
 
     if (!user || !video) return;
