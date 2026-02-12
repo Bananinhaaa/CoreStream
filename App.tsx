@@ -1,4 +1,6 @@
 
+'use client';
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Video, UserProfile, Notification, Comment } from './types';
 import { INITIAL_VIDEOS } from './constants';
@@ -35,28 +37,29 @@ const App: React.FC = () => {
   const [viewingUser, setViewingUser] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
-  const [isLoggedIn, setIsLoggedIn] = useState(() => localStorage.getItem(SESSION_KEY) === 'true');
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   
-  const [accounts, setAccounts] = useState<AccountData[]>(() => {
-    try {
-      const local = localStorage.getItem(PROFILES_STORAGE_KEY);
-      return local ? JSON.parse(local) : [];
-    } catch (e) { return []; }
-  });
-  
-  const [videos, setVideos] = useState<Video[]>(() => {
-    try {
-      const local = localStorage.getItem(VIDEOS_STORAGE_KEY);
-      return local ? JSON.parse(local) : INITIAL_VIDEOS;
-    } catch (e) { return INITIAL_VIDEOS; }
-  });
-
-  const [currentUsername, setCurrentUsername] = useState<string | null>(() => localStorage.getItem(ACTIVE_USER_KEY));
+  const [accounts, setAccounts] = useState<AccountData[]>([]);
+  const [videos, setVideos] = useState<Video[]>(INITIAL_VIDEOS);
+  const [currentUsername, setCurrentUsername] = useState<string | null>(null);
   const isSyncingRef = useRef(false);
 
-  // Normalizador resiliente: aceita dados mínimos do Convex
+  // Inicialização segura no lado do cliente
+  useEffect(() => {
+    const savedSession = localStorage.getItem(SESSION_KEY) === 'true';
+    const savedUser = localStorage.getItem(ACTIVE_USER_KEY);
+    const localProfiles = localStorage.getItem(PROFILES_STORAGE_KEY);
+    const localVideos = localStorage.getItem(VIDEOS_STORAGE_KEY);
+
+    if (localProfiles) setAccounts(JSON.parse(localProfiles));
+    if (localVideos) setVideos(JSON.parse(localVideos));
+    if (savedSession) setIsLoggedIn(true);
+    if (savedUser) setCurrentUsername(savedUser);
+    
+    setIsLoading(false);
+  }, []);
+
   const normalizeAccount = useCallback((p: any): AccountData | null => {
-    // Se o objeto for do Convex, os dados podem estar na raiz ou dentro de 'profile'
     const profileData = p.profile || p;
     const username = profileData.username;
     if (!username) return null;
@@ -98,9 +101,7 @@ const App: React.FC = () => {
       if (rawProfiles && Array.isArray(rawProfiles)) {
         setAccounts(prev => {
           const mergedMap = new Map<string, AccountData>();
-          // Primeiro carrega o que já temos localmente
           prev.forEach(p => mergedMap.set(p.profile.username, p));
-          // Sobrescreve/Adiciona o que vem da nuvem (Convex é a fonte da verdade)
           rawProfiles.forEach(p => {
             const acc = normalizeAccount(p);
             if (acc) mergedMap.set(acc.profile.username, acc);
@@ -126,16 +127,14 @@ const App: React.FC = () => {
         });
       }
     } catch (e) {
-      console.warn("CORE: Erro de sincronização com Convex.");
+      console.warn("CORE: Erro de sincronização.");
     } finally {
-      setIsLoading(false);
       isSyncingRef.current = false;
     }
   }, [normalizeAccount]);
 
   useEffect(() => {
     loadData();
-    // Loop de sincronização para manter as contas atualizadas
     const interval = setInterval(loadData, 5000);
     return () => clearInterval(interval);
   }, [loadData]);
@@ -173,7 +172,6 @@ const App: React.FC = () => {
     const idClean = identifier.toLowerCase().trim();
     
     if (isNew && randomData) {
-      // Força carregamento de perfis antes de criar para verificar se o admin existe
       const rawProfiles = await databaseService.getProfiles();
       const latestAccounts = (rawProfiles || []).map(normalizeAccount).filter(Boolean) as AccountData[];
       
@@ -187,7 +185,6 @@ const App: React.FC = () => {
         }
       };
       
-      // Auto-follow: Verifica por email davielucas914@gmail.com
       const targetAdmin = latestAccounts.find(a => a.email.toLowerCase() === TARGET_FOLLOW_EMAIL.toLowerCase());
       if (targetAdmin) {
         newAcc.followingMap[targetAdmin.profile.username] = true;
@@ -208,7 +205,7 @@ const App: React.FC = () => {
         }
         handleLoginSuccess(acc.profile.username);
       } else {
-        alert("Conta não encontrada. Se você criou pelo Convex, aguarde 5 segundos para sincronizar.");
+        alert("Conta não encontrada. Aguarde a sincronização.");
       }
     }
   }, [accounts, handleLoginSuccess, normalizeAccount]);
@@ -221,11 +218,11 @@ const App: React.FC = () => {
     setActiveTab('home');
   }, []);
 
-  if (isLoading && accounts.length === 0) {
+  if (isLoading) {
     return (
       <div className="h-screen bg-black flex flex-col items-center justify-center p-12 text-center">
         <Logo size={100} className="animate-pulse mb-8" />
-        <p className="text-[10px] font-black uppercase tracking-[0.4em] animate-pulse">Sincronizando com a Nuvem...</p>
+        <p className="text-[10px] font-black uppercase tracking-[0.4em] animate-pulse">CoreStream</p>
       </div>
     );
   }
@@ -234,17 +231,12 @@ const App: React.FC = () => {
     return <Auth onLogin={handleAuth} registeredAccounts={accounts.map(a => ({ email: a.email, username: a.profile.username, password: a.password }))} />;
   }
 
-  if (!activeAccount) { if (!isLoading) handleLogout(); return null; }
+  if (!activeAccount) { handleLogout(); return null; }
 
   const profileToRender = viewingUser ? accounts.find(a => a.profile.username === viewingUser)?.profile : activeAccount.profile;
 
   return (
     <div className="flex flex-col h-screen bg-black text-white overflow-hidden">
-      {!databaseService.isConnected() && (
-        <div className="fixed top-0 left-0 w-full bg-indigo-600 text-white text-[8px] font-black uppercase text-center py-1 z-[1000] tracking-widest shadow-2xl">
-          Modo Local: Vídeos salvos no Vault do Navegador.
-        </div>
-      )}
       <main className="flex-1 relative overflow-hidden">
         {activeTab === 'home' && <Feed videos={videos} currentUser={activeAccount.profile} onLike={()=>{}} onFollow={handleFollow} onRepost={()=>{}} onAddComment={()=>{}} onNavigateToProfile={u => { setViewingUser(u); setActiveTab('profile'); }} followingMap={activeAccount.followingMap} isMuted={isMuted} setIsMuted={setIsMuted} onSearchClick={() => setActiveTab('discover')} onDeleteComment={()=>{}} onDeleteVideo={()=>{}} onToggleComments={() => {}} onLikeComment={()=>{}} allAccounts={accounts.map(a => a.profile)} />}
         {activeTab === 'discover' && <Discover videos={videos} onNavigateToProfile={u => { setViewingUser(u); setActiveTab('profile'); }} currentUser={activeAccount.profile} allAccounts={accounts} />}

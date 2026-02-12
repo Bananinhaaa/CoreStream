@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { Video, UserProfile } from '../types';
 import { getTrendingNews } from '../services/geminiService';
@@ -73,6 +72,37 @@ const Discover: React.FC<DiscoverProps> = ({ videos, onNavigateToProfile, curren
                     </div>
                     <p className="text-[8px] font-black text-white uppercase truncate w-14 text-center">{user.displayName}</p>
                   </div>
+                ))}
+             </div>
+          </section>
+        )}
+
+        {/* Adicionando Seção de Tendências baseada no Grounding do Google Search conforme as diretrizes da API Gemini */}
+        {trends.length > 0 && (
+          <section className="animate-view">
+             <div className="flex items-center justify-between mb-6 px-1">
+               <h3 className="text-[10px] font-black uppercase text-indigo-400 tracking-[0.4em] flex items-center gap-2">
+                 Tendências Mundiais
+                 <svg className="w-3 h-3 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" strokeWidth="2.5"/></svg>
+               </h3>
+             </div>
+             <div className="space-y-3">
+                {trends.map((chunk, idx) => (
+                  chunk.web && (
+                    <a 
+                      key={idx} 
+                      href={chunk.web.uri} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 transition-all group"
+                    >
+                      <div className="flex-1 overflow-hidden pr-4">
+                        <p className="text-xs font-black text-white truncate">{chunk.web.title}</p>
+                        <p className="text-[7px] text-gray-500 font-bold uppercase truncate mt-0.5">{chunk.web.uri}</p>
+                      </div>
+                      <svg className="w-3 h-3 text-gray-600 group-hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    </a>
+                  )
                 ))}
              </div>
           </section>

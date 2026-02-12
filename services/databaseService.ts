@@ -2,14 +2,16 @@
 import { Video, UserProfile } from '../types';
 import { INITIAL_VIDEOS } from '../constants';
 
-const convexUrl = (import.meta as any).env?.VITE_CONVEX_URL || '';
+// Padrão Next.js para variáveis públicas
+const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL || '';
 const isConfigured = !!convexUrl && convexUrl !== 'undefined' && convexUrl.includes('.cloud');
 
 const PROFILES_STORAGE_KEY = 'CORE_PROFILES_V3';
 const VIDEOS_STORAGE_KEY = 'CORE_VIDEOS_V3';
 
-// Gerenciador de Banco de Dados Local (Arquivos Binários)
-const openDB = (): Promise<IDBDatabase> => {
+// Gerenciador de Banco de Dados Local (Arquivos Binários no Cliente)
+const openDB = (): Promise<IDBDatabase | null> => {
+  if (typeof window === 'undefined') return Promise.resolve(null);
   return new Promise((resolve, reject) => {
     const request = indexedDB.open('CoreStream_Vault', 2);
     request.onupgradeneeded = (e: any) => {
@@ -26,6 +28,7 @@ const openDB = (): Promise<IDBDatabase> => {
 const saveVideoFile = async (id: string, file: Blob) => {
   try {
     const db = await openDB();
+    if (!db) return;
     const tx = db.transaction('videos', 'readwrite');
     await tx.objectStore('videos').put(file, id);
     return new Promise((res) => tx.oncomplete = res);
@@ -35,6 +38,7 @@ const saveVideoFile = async (id: string, file: Blob) => {
 const getVideoFile = async (id: string): Promise<string | null> => {
   try {
     const db = await openDB();
+    if (!db) return null;
     const tx = db.transaction('videos', 'readonly');
     const store = tx.objectStore('videos');
     const request = store.get(id);
@@ -65,6 +69,8 @@ export const databaseService = {
   },
 
   async getVideos(): Promise<Video[] | null> {
+    if (typeof window === 'undefined') return INITIAL_VIDEOS;
+    
     const localJson = localStorage.getItem(VIDEOS_STORAGE_KEY);
     let videos: Video[] = localJson ? JSON.parse(localJson) : INITIAL_VIDEOS;
 
@@ -112,6 +118,7 @@ export const databaseService = {
   },
 
   async getProfiles(): Promise<any[] | null> {
+    if (typeof window === 'undefined') return [];
     const local = JSON.parse(localStorage.getItem(PROFILES_STORAGE_KEY) || '[]');
     if (!isConfigured) return local;
     try {
@@ -125,7 +132,6 @@ export const databaseService = {
     const profile = account.profile || account;
     if (!profile.username) return;
 
-    // Garante que o email seja preservado para o sistema de busca
     const payload = {
       profile: { ...profile, lastSeen: Date.now() },
       email: account.email || profile.email || '',
