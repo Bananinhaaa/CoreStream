@@ -3,48 +3,8 @@ import { v } from "convex/values";
 import { mutation, query } from "./server";
 
 /**
- * Retorna os vídeos mais populares (Trending)
- */
-export const getTrending = query({
-  args: { limit: v.number() },
-  handler: async (ctx: any, args: any) => {
-    return await ctx.db
-      .query("videos")
-      .order("desc")
-      .take(args.limit);
-  },
-});
-
-/**
- * Retorna o perfil público de um usuário
- */
-export const getPublicProfile = query({
-  args: { username: v.string() },
-  handler: async (ctx: any, args: any) => {
-    return await ctx.db
-      .query("profiles")
-      .withIndex("by_username", (q: any) => q.eq("username", args.username))
-      .first();
-  },
-});
-
-/**
- * Busca vídeos por texto na descrição
- */
-export const searchVideos = query({
-  args: { queryText: v.string() },
-  handler: async (ctx: any, args: any) => {
-    const term = args.queryText.toLowerCase();
-    const allVideos = await ctx.db.query("videos").collect();
-    return allVideos.filter((v: any) => 
-      v.description.toLowerCase().includes(term) || 
-      v.username.toLowerCase().includes(term)
-    );
-  },
-});
-
-/**
  * Alterna o estado de "curtida" em um vídeo.
+ * Atualiza o contador do vídeo e o total de likes no perfil do dono.
  */
 export const toggleLike = mutation({
   args: { 
@@ -52,10 +12,11 @@ export const toggleLike = mutation({
     increment: v.boolean(),
     ownerUsername: v.string() 
   },
-  handler: async (ctx: any, args: any) => {
+  handler: async (ctx, args) => {
+    // 1. Atualiza o vídeo
     const video = await ctx.db
       .query("videos")
-      .withIndex("by_videoId", (q: any) => q.eq("id", args.videoId))
+      .withIndex("by_videoId", (q) => q.eq("id", args.videoId))
       .first();
 
     if (video) {
@@ -63,9 +24,10 @@ export const toggleLike = mutation({
       await ctx.db.patch(video._id, { likes: newLikes });
     }
 
+    // 2. Atualiza o perfil do dono do vídeo (total de likes recebidos)
     const profile = await ctx.db
       .query("profiles")
-      .withIndex("by_username", (q: any) => q.eq("username", args.ownerUsername))
+      .withIndex("by_username", (q) => q.eq("username", args.ownerUsername))
       .first();
 
     if (profile) {
@@ -75,25 +37,30 @@ export const toggleLike = mutation({
   },
 });
 
+/**
+ * Lógica de seguir/parar de seguir.
+ * Atualiza o mapa de seguimento do usuário e os contadores de ambos.
+ */
 export const toggleFollow = mutation({
   args: { 
     myUsername: v.string(), 
     targetUsername: v.string(),
     isFollowing: v.boolean()
   },
-  handler: async (ctx: any, args: any) => {
+  handler: async (ctx, args) => {
     const me = await ctx.db
       .query("profiles")
-      .withIndex("by_username", (q: any) => q.eq("username", args.myUsername))
+      .withIndex("by_username", (q) => q.eq("username", args.myUsername))
       .first();
 
     const target = await ctx.db
       .query("profiles")
-      .withIndex("by_username", (q: any) => q.eq("username", args.targetUsername))
+      .withIndex("by_username", (q) => q.eq("username", args.targetUsername))
       .first();
 
     if (!me || !target) return;
 
+    // Atualiza meu perfil (quem eu sigo)
     const myFollowingMap = { ...(me.followingMap || {}) };
     if (args.isFollowing) {
       myFollowingMap[args.targetUsername] = true;
@@ -106,21 +73,25 @@ export const toggleFollow = mutation({
       following: Math.max(0, (me.following || 0) + (args.isFollowing ? 1 : -1))
     });
 
+    // Atualiza o perfil alvo (seguidores dele)
     await ctx.db.patch(target._id, {
       followers: Math.max(0, (target.followers || 0) + (args.isFollowing ? 1 : -1))
     });
   },
 });
 
+/**
+ * Adiciona um comentário a um vídeo.
+ */
 export const addComment = mutation({
   args: {
     videoId: v.string(),
-    comment: v.any(),
+    comment: v.any(), // Objeto do tipo Comment definido no types.ts
   },
-  handler: async (ctx: any, args: any) => {
+  handler: async (ctx, args) => {
     const video = await ctx.db
       .query("videos")
-      .withIndex("by_videoId", (q: any) => q.eq("id", args.videoId))
+      .withIndex("by_videoId", (q) => q.eq("id", args.videoId))
       .first();
 
     if (video) {
@@ -130,15 +101,18 @@ export const addComment = mutation({
   },
 });
 
+/**
+ * Remove um comentário de um vídeo.
+ */
 export const deleteComment = mutation({
   args: {
     videoId: v.string(),
     commentId: v.string(),
   },
-  handler: async (ctx: any, args: any) => {
+  handler: async (ctx, args) => {
     const video = await ctx.db
       .query("videos")
-      .withIndex("by_videoId", (q: any) => q.eq("id", args.videoId))
+      .withIndex("by_videoId", (q) => q.eq("id", args.videoId))
       .first();
 
     if (video) {
@@ -148,28 +122,34 @@ export const deleteComment = mutation({
   },
 });
 
+/**
+ * Republica um vídeo.
+ */
 export const repost = mutation({
   args: {
     username: v.string(),
     videoId: v.string(),
   },
-  handler: async (ctx: any, args: any) => {
+  handler: async (ctx, args) => {
     const user = await ctx.db
       .query("profiles")
-      .withIndex("by_username", (q: any) => q.eq("username", args.username))
+      .withIndex("by_username", (q) => q.eq("username", args.username))
       .first();
 
     const video = await ctx.db
       .query("videos")
-      .withIndex("by_videoId", (q: any) => q.eq("id", args.videoId))
+      .withIndex("by_videoId", (q) => q.eq("id", args.videoId))
       .first();
 
     if (!user || !video) return;
 
+    // Adiciona ao perfil do usuário
     const reposts = [...(user.repostedVideoIds || [])];
     if (!reposts.includes(args.videoId)) {
       reposts.push(args.videoId);
       await ctx.db.patch(user._id, { repostedVideoIds: reposts });
+
+      // Incrementa no vídeo
       await ctx.db.patch(video._id, { reposts: (video.reposts || 0) + 1 });
     }
   },

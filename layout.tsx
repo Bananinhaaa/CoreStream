@@ -1,9 +1,8 @@
-
 import React from "react";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
-// Usando 'any' temporariamente para os tipos de metadados se o módulo 'next' não puder ser resolvido pelo compilador TS local
-export const metadata: any = {
+export const metadata: Metadata = {
   title: "CoreStream",
   description: "Rede social de vídeos de Scripter",
   appleWebApp: {
@@ -14,7 +13,7 @@ export const metadata: any = {
   manifest: "/manifest.json",
 };
 
-export const viewport: any = {
+export const viewport: Viewport = {
   themeColor: "#000000",
   width: "device-width",
   initialScale: 1,
@@ -23,6 +22,7 @@ export const viewport: any = {
   viewportFit: "cover",
 };
 
+// Fix: Importando React para utilizar o namespace React.ReactNode no TypeScript
 export default function RootLayout({
   children,
 }: Readonly<{
